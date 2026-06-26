@@ -1,0 +1,210 @@
+-- =============================================================================
+-- 00_full_setup.sql — ONE-SHOT setup for course-planner
+-- Unofficial NTU 115-1 tentative course planner.
+--
+-- Paste this ENTIRE file into the Supabase SQL Editor and run once.
+-- It is idempotent (safe to re-run) and contains, in order:
+--   1. extensions
+--   2. functions (updated_at trigger fn)
+--   3. schema   (tables + triggers)         — see 01_schema.sql
+--   4. indexes  (incl. trigram name search) — see 03_indexes.sql
+--   5. RLS policies                          — see 02_rls_policies.sql
+--   6. sample seed (FAKE data)               — see 04_seed_sample.sql  [optional]
+--
+-- Does NOT modify Supabase Auth. References auth.users but never redefines it;
+-- never creates its own users table.
+--
+-- The scraper writes with the service-role key (bypasses RLS). Clients use the
+-- anon key and are fully constrained by the policies below.
+-- =============================================================================
+
+-- ============================ 1. EXTENSIONS ==================================
+create extension if not exists "pgcrypto";   -- gen_random_uuid()
+create extension if not exists "pg_trgm";     -- trigram search
+
+-- ============================ 2. FUNCTIONS ===================================
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+-- ============================ 3. SCHEMA ======================================
+create table if not exists public.courses (
+  id                  uuid primary key default gen_random_uuid(),
+  semester            text        not null,
+  pk                  text,
+  building_or_college text,
+  course_name         text        not null,
+  class_group         text,
+  teacher             text,
+  source_url          text,
+  scraped_at          timestamptz not null default now(),
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  constraint courses_semester_pk_key unique (semester, pk)
+);
+
+drop trigger if exists trg_courses_updated_at on public.courses;
+create trigger trg_courses_updated_at
+  before update on public.courses
+  for each row execute function public.set_updated_at();
+
+create table if not exists public.course_sessions (
+  id            uuid primary key default gen_random_uuid(),
+  course_id     uuid not null references public.courses (id) on delete cascade,
+  weekday       int  check (weekday between 1 and 7),
+  classroom     text,
+  raw_time_text text,
+  periods       text[] not null default '{}',
+  start_time    time,
+  end_time      time,
+  created_at    timestamptz not null default now(),
+  constraint course_sessions_unique
+    unique (course_id, weekday, raw_time_text, classroom)
+);
+
+create table if not exists public.user_timetables (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  name       text not null default '我的暫排課表',
+  semester   text not null default '115-1',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_user_timetables_updated_at on public.user_timetables;
+create trigger trg_user_timetables_updated_at
+  before update on public.user_timetables
+  for each row execute function public.set_updated_at();
+
+create table if not exists public.timetable_courses (
+  id           uuid primary key default gen_random_uuid(),
+  timetable_id uuid not null references public.user_timetables (id) on delete cascade,
+  course_id    uuid not null references public.courses (id) on delete cascade,
+  created_at   timestamptz not null default now(),
+  constraint timetable_courses_unique unique (timetable_id, course_id)
+);
+
+create table if not exists public.scrape_runs (
+  id            uuid primary key default gen_random_uuid(),
+  semester      text not null,
+  started_at    timestamptz not null default now(),
+  finished_at   timestamptz,
+  status        text not null,
+  course_count  int default 0,
+  error_message text
+);
+
+-- ============================ 4. INDEXES =====================================
+create index if not exists idx_courses_semester     on public.courses (semester);
+create index if not exists idx_courses_pk           on public.courses (pk);
+create index if not exists idx_courses_building      on public.courses (building_or_college);
+create index if not exists idx_courses_name_trgm
+  on public.courses using gin (course_name gin_trgm_ops);
+create index if not exists idx_courses_teacher_trgm
+  on public.courses using gin (teacher gin_trgm_ops);
+
+create index if not exists idx_sessions_weekday   on public.course_sessions (weekday);
+create index if not exists idx_sessions_classroom on public.course_sessions (classroom);
+create index if not exists idx_sessions_course    on public.course_sessions (course_id);
+create index if not exists idx_sessions_periods
+  on public.course_sessions using gin (periods);
+
+create index if not exists idx_timetable_courses_timetable
+  on public.timetable_courses (timetable_id);
+create index if not exists idx_timetable_courses_course
+  on public.timetable_courses (course_id);
+create index if not exists idx_user_timetables_user
+  on public.user_timetables (user_id);
+
+-- ============================ 5. RLS POLICIES ================================
+-- courses: public read; no client write.
+alter table public.courses enable row level security;
+drop policy if exists "courses_select_public" on public.courses;
+create policy "courses_select_public"
+  on public.courses for select using (true);
+
+-- course_sessions: public read; no client write.
+alter table public.course_sessions enable row level security;
+drop policy if exists "course_sessions_select_public" on public.course_sessions;
+create policy "course_sessions_select_public"
+  on public.course_sessions for select using (true);
+
+-- user_timetables: owner-only.
+alter table public.user_timetables enable row level security;
+drop policy if exists "user_timetables_select_own" on public.user_timetables;
+create policy "user_timetables_select_own"
+  on public.user_timetables for select using (auth.uid() = user_id);
+drop policy if exists "user_timetables_insert_own" on public.user_timetables;
+create policy "user_timetables_insert_own"
+  on public.user_timetables for insert with check (auth.uid() = user_id);
+drop policy if exists "user_timetables_update_own" on public.user_timetables;
+create policy "user_timetables_update_own"
+  on public.user_timetables for update
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "user_timetables_delete_own" on public.user_timetables;
+create policy "user_timetables_delete_own"
+  on public.user_timetables for delete using (auth.uid() = user_id);
+
+-- timetable_courses: access via owning timetable.
+alter table public.timetable_courses enable row level security;
+drop policy if exists "timetable_courses_select_own" on public.timetable_courses;
+create policy "timetable_courses_select_own"
+  on public.timetable_courses for select using (
+    exists (select 1 from public.user_timetables t
+            where t.id = timetable_courses.timetable_id and t.user_id = auth.uid())
+  );
+drop policy if exists "timetable_courses_insert_own" on public.timetable_courses;
+create policy "timetable_courses_insert_own"
+  on public.timetable_courses for insert with check (
+    exists (select 1 from public.user_timetables t
+            where t.id = timetable_courses.timetable_id and t.user_id = auth.uid())
+  );
+drop policy if exists "timetable_courses_delete_own" on public.timetable_courses;
+create policy "timetable_courses_delete_own"
+  on public.timetable_courses for delete using (
+    exists (select 1 from public.user_timetables t
+            where t.id = timetable_courses.timetable_id and t.user_id = auth.uid())
+  );
+
+-- scrape_runs: RLS on, no policies => denied to all clients (service-role only).
+alter table public.scrape_runs enable row level security;
+
+-- ============================ 6. SAMPLE SEED (FAKE) ==========================
+-- Optional. Dummy data for local front-end development only. Delete this block
+-- if you only want the schema. user_timetables / timetable_courses are NOT
+-- seeded (they need a real auth.users id).
+with seeded as (
+  insert into public.courses
+    (semester, pk, building_or_college, course_name, class_group, teacher, source_url)
+  values
+    ('115-1', 'S0001', '共同教室',   '範例課程：微積分（甲）', '01',  '王小明', 'sample-seed'),
+    ('115-1', 'S0002', '電機二館',   '範例課程：資料結構',     null,  '李大華', 'sample-seed'),
+    ('115-1', 'S0003', '普通教學館', '範例課程：社會學概論',   'A',   '陳美玲', 'sample-seed'),
+    ('115-1', 'S0004', '共同教室',   '範例課程：英文（中級）', '02',  '張文彬', 'sample-seed'),
+    ('115-1', 'S0005', '管理學院',   '範例課程：行銷管理',     null,  '林志豪', 'sample-seed')
+  on conflict (semester, pk) do update
+    set course_name = excluded.course_name, scraped_at = now()
+  returning id, pk
+)
+insert into public.course_sessions
+  (course_id, weekday, classroom, raw_time_text, periods, start_time, end_time)
+select id, v.weekday, v.classroom, v.raw_time_text, v.periods, v.start_time, v.end_time
+from seeded
+join (values
+    ('S0001', 1, '101', '10:20-12:10', '{3,4}'::text[],   time '10:20', time '12:10'),
+    ('S0002', 3, '105', '09:10-12:10', '{2,3,4}'::text[], time '09:10', time '12:10'),
+    ('S0003', 5, '201', '13:20-15:10', '{6,7}'::text[],   time '13:20', time '15:10'),
+    ('S0004', 1, '101', '10:20-11:10', '{3}'::text[],     time '10:20', time '11:10'),
+    ('S0005', 2, '301', '18:25-20:10', '{A,B}'::text[],   time '18:25', time '20:10')
+  ) as v(pk, weekday, classroom, raw_time_text, periods, start_time, end_time)
+  on seeded.pk = v.pk
+on conflict (course_id, weekday, raw_time_text, classroom) do nothing;
+
+insert into public.scrape_runs (semester, started_at, finished_at, status, course_count)
+values ('115-1', now(), now(), 'success', (select count(*) from public.courses));

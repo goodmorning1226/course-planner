@@ -1,0 +1,206 @@
+import { NextResponse } from "next/server";
+import { createPublicServerClient } from "@/lib/supabase/server";
+import { courseSearchQuerySchema } from "@/lib/validations";
+import { rateLimit, clientKey, RATE_LIMITS } from "@/lib/rate-limit";
+import { apiError, rateLimited } from "@/lib/api-error";
+import type {
+  Course,
+  CourseSession,
+  CourseWithSessions,
+} from "@/lib/courses/types";
+
+// GET /api/courses — search courses (reads our own DB, never NTU directly).
+//
+// Returns { data: CourseWithSessions[]; nextCursor: string | null } with
+// cursor-based (offset) pagination for infinite scroll.
+//
+// Query strategy (kept simple & stable, no N+1):
+//   1. Session-level filters (weekday / period / classroom) are applied as an
+//      embedded INNER join on course_sessions, so a course is included iff it
+//      has a session matching them — and pagination stays on `courses`.
+//   2. `q` searches course_name / teacher / pk (on courses) AND classroom (on
+//      sessions, resolved via one bounded pre-query), combined as an OR group.
+//   3. One paged courses query (limit + 1 rows) + ONE sessions query for the
+//      returned page. Relevance ordering (req: pk-exact > name > teacher) is
+//      applied to the page.
+
+/** Generous cap for the classroom-search pre-query (q matching classrooms). */
+const Q_CLASSROOM_ID_CAP = 300;
+
+/** Remove characters that are structural in PostgREST's or() grammar. */
+function sanitizeForOr(s: string): string {
+  return s.replace(/[(),]/g, "").trim();
+}
+
+function encodeCursor(offset: number): string {
+  return Buffer.from(String(offset), "utf8").toString("base64url");
+}
+
+function decodeCursor(cursor: string): number | null {
+  try {
+    const n = parseInt(Buffer.from(cursor, "base64url").toString("utf8"), 10);
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Relevance rank for ordering when a query is present (lower = better). */
+function relevanceRank(c: Course, q: string): number {
+  if (c.pk && c.pk === q) return 0;
+  if (c.course_name && c.course_name.includes(q)) return 1;
+  if (c.teacher && c.teacher.includes(q)) return 2;
+  return 3;
+}
+
+export async function GET(req: Request) {
+  // 9. Basic rate limit.
+  const rl = rateLimit(
+    clientKey(req, "courses"),
+    RATE_LIMITS.search.limit,
+    RATE_LIMITS.search.windowMs
+  );
+  if (!rl.ok) return rateLimited(rl.resetAt);
+
+  // 8. Server-side validation (unknown query keys are stripped → whitelist).
+  const { searchParams } = new URL(req.url);
+  const parsed = courseSearchQuerySchema.safeParse(
+    Object.fromEntries(searchParams)
+  );
+  if (!parsed.success) {
+    return apiError("invalid_request", "查詢參數不合法。");
+  }
+  const { q, weekday, period, buildingOrCollege, teacher, cursor, limit } =
+    parsed.data;
+
+  // Multi-select filters: comma lists → arrays (OR within each group).
+  const weekdays = weekday ? weekday.split(",").map(Number) : undefined;
+  const periods = period ? period.split(",") : undefined;
+  const buildings = buildingOrCollege
+    ? buildingOrCollege.split(",").map((s) => s.trim()).filter(Boolean)
+    : undefined;
+
+  let offset = 0;
+  if (cursor) {
+    const decoded = decodeCursor(cursor);
+    if (decoded === null) {
+      return apiError("invalid_request", "cursor 格式不合法。");
+    }
+    offset = decoded;
+  }
+
+  try {
+    // Public, cookie-free client → response is safely CDN-cacheable.
+    const supabase = createPublicServerClient();
+    const hasSessionFilter =
+      (weekdays?.length ?? 0) > 0 || (periods?.length ?? 0) > 0;
+
+    // q also searches classroom (a session column): resolve matching course ids.
+    let qClassroomIds: string[] = [];
+    if (q) {
+      const { data, error } = await supabase
+        .from("course_sessions")
+        .select("course_id")
+        .ilike("classroom", `%${q}%`)
+        .limit(Q_CLASSROOM_ID_CAP);
+      if (error) throw error;
+      qClassroomIds = Array.from(
+        new Set((data ?? []).map((r) => r.course_id as string))
+      );
+    }
+
+    // Build the courses query.
+    const selectStr = hasSessionFilter
+      ? "*, course_sessions!inner(course_id)"
+      : "*";
+    let cq = supabase.from("courses").select(selectStr);
+
+    // (1) Session-level filters via embedded inner join (EXISTS semantics).
+    // A matching session must be on one of the selected weekdays AND have at
+    // least one of the selected periods.
+    if (weekdays?.length) cq = cq.in("course_sessions.weekday", weekdays);
+    if (periods?.length)
+      cq = cq.overlaps("course_sessions.periods", periods);
+
+    // Course-level filters: building/college is an exact-label list (OR).
+    if (buildings?.length) cq = cq.in("building_or_college", buildings);
+    if (teacher) cq = cq.ilike("teacher", `%${teacher}%`);
+
+    // (2) Free-text search OR group.
+    if (q) {
+      const safe = sanitizeForOr(q);
+      const ors: string[] = [];
+      if (safe) {
+        ors.push(`pk.eq.${safe}`);
+        ors.push(`course_name.ilike.*${safe}*`);
+        ors.push(`teacher.ilike.*${safe}*`);
+      }
+      if (qClassroomIds.length > 0) {
+        ors.push(`id.in.(${qClassroomIds.join(",")})`);
+      }
+      if (ors.length > 0) cq = cq.or(ors.join(","));
+    }
+
+    // Stable base ordering + paginate (fetch limit + 1 to detect "more").
+    cq = cq
+      .order("course_name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + limit);
+
+    const { data: rawRows, error } = await cq;
+    if (error) throw error;
+
+    const rows = (rawRows ?? []) as unknown as (Course & {
+      course_sessions?: unknown;
+    })[];
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? encodeCursor(offset + limit) : null;
+
+    // (3) One query for all sessions of the returned page — no N+1.
+    const pageIds = pageRows.map((r) => r.id);
+    const sessionsByCourse = new Map<string, CourseSession[]>();
+    if (pageIds.length > 0) {
+      const { data: sessions, error: sErr } = await supabase
+        .from("course_sessions")
+        .select("*")
+        .in("course_id", pageIds);
+      if (sErr) throw sErr;
+      for (const s of (sessions ?? []) as CourseSession[]) {
+        const list = sessionsByCourse.get(s.course_id) ?? [];
+        list.push(s);
+        sessionsByCourse.set(s.course_id, list);
+      }
+    }
+
+    const data: CourseWithSessions[] = pageRows.map((row) => {
+      // Strip the embedded join helper; keep only Course columns.
+      const { course_sessions: _omit, ...course } = row;
+      return { ...(course as Course), sessions: sessionsByCourse.get(course.id) ?? [] };
+    });
+
+    // 11. Relevance ordering for the page when a query is present.
+    if (q) {
+      data.sort(
+        (a, b) =>
+          relevanceRank(a, q) - relevanceRank(b, q) ||
+          a.course_name.localeCompare(b.course_name)
+      );
+    }
+
+    return NextResponse.json(
+      { data, nextCursor },
+      {
+        // Course data is public + low-churn (scraped a couple times a day):
+        // let the CDN cache popular identical queries to ease DB load.
+        headers: {
+          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+        },
+      }
+    );
+  } catch (err) {
+    // 10. Do not leak internals to the client.
+    console.error("[/api/courses] query failed:", err);
+    return apiError("internal_error", "伺服器發生錯誤，請稍後再試。");
+  }
+}

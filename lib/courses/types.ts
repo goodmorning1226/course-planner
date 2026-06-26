@@ -1,0 +1,98 @@
+// Shared domain types for course-planner.
+// Field names mirror the Supabase columns (snake_case) so query rows map
+// directly onto these types. See supabase/01_schema.sql.
+
+/**
+ * NTU period codes. Supports 0–10 plus the evening blocks A–D.
+ * Stored in the DB as text[] so numeric and letter codes coexist.
+ */
+export type PeriodCode =
+  | "0"
+  | "1"
+  | "2"
+  | "3"
+  | "4"
+  | "5"
+  | "6"
+  | "7"
+  | "8"
+  | "9"
+  | "10"
+  | "A"
+  | "B"
+  | "C"
+  | "D";
+
+/** Day of week, 1 = Monday … 7 = Sunday. */
+export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+/**
+ * A course header — one row of the `courses` table. Time/room details live in
+ * `CourseSession` rows linked by course_id.
+ */
+export interface Course {
+  id: string;
+  /** 學期, e.g. "115-1". */
+  semester: string;
+  /** 流水號 / 來源 PK. */
+  pk: string | null;
+  /** 建物 / 學院. */
+  building_or_college: string | null;
+  /** 課名. */
+  course_name: string;
+  /** 班次. */
+  class_group: string | null;
+  /** 教師. */
+  teacher: string | null;
+  /** 資料來源 URL. */
+  source_url: string | null;
+  /** 爬取時間 (ISO string). */
+  scraped_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A single meeting time/room of a course — one row of `course_sessions`.
+ * A course may have several sessions.
+ */
+export interface CourseSession {
+  id: string;
+  course_id: string;
+  /** 星期 1–7. */
+  weekday: Weekday | null;
+  /** 教室. */
+  classroom: string | null;
+  /** 原始上課時間, e.g. "10:20-12:10". */
+  raw_time_text: string | null;
+  /** 轉換後節次, e.g. ["3", "4"]. */
+  periods: PeriodCode[];
+  /** 起 (e.g. "10:20:00") — optional. */
+  start_time: string | null;
+  /** 迄 — optional. */
+  end_time: string | null;
+  created_at: string;
+}
+
+/** A course together with all of its sessions — the shape used by the UI. */
+export interface CourseWithSessions extends Course {
+  sessions: CourseSession[];
+}
+
+/** A membership row of `timetable_courses` — a course inside a timetable. */
+export interface TimetableCourse {
+  id: string;
+  timetable_id: string;
+  course_id: string;
+  created_at: string;
+}
+
+/** Filters accepted by the course search endpoint. */
+export interface CourseSearchFilters {
+  q?: string;
+  weekday?: Weekday;
+  period?: PeriodCode;
+  building_or_college?: string;
+  classroom?: string;
+  teacher?: string;
+}

@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Neutral, intentionally non-NTU palette. */
+  --background: 0 0% 100%;
+  --foreground: 222 14% 14%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 9% 46%;
+  --border: 220 13% 90%;
+  --card: 0 0% 100%;
+  --accent: 221 39% 30%;
+  --accent-foreground: 0 0% 100%;
+  --warning: 25 90% 48%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 222 18% 9%;
+    --foreground: 210 16% 92%;
+    --muted: 220 14% 16%;
+    --muted-foreground: 220 9% 60%;
+    --border: 220 13% 22%;
+    --card: 222 16% 11%;
+    --accent: 210 30% 70%;
+    --accent-foreground: 222 18% 9%;
+    --warning: 28 90% 58%;
+  }
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+}
