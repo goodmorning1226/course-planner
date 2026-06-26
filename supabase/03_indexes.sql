@@ -41,3 +41,6 @@ create index if not exists idx_timetable_courses_course
 -- --- user_timetables ---------------------------------------------------------
 create index if not exists idx_user_timetables_user
   on public.user_timetables (user_id);
+
+-- course_metadata / course_requirements indexes live in 05_course_metadata.sql
+-- (also folded into 00_full_setup.sql).

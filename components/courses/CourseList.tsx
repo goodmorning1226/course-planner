@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CourseWithSessions } from "@/lib/courses/types";
+import type { CourseWithSessionsAndMetadata } from "@/lib/courses/types";
 import type { SearchFilters } from "./CourseFilters";
 import { CourseCard } from "./CourseCard";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 type Status = "loading" | "loadingMore" | "ready" | "error";
 
 interface ApiResponse {
-  data: CourseWithSessions[];
+  data: CourseWithSessionsAndMetadata[];
   nextCursor: string | null;
 }
 
@@ -25,6 +25,15 @@ function buildUrl(q: string, filters: SearchFilters, cursor: string | null) {
   if (filters.buildingOrCollege?.length)
     p.set("buildingOrCollege", filters.buildingOrCollege.join(","));
   if (filters.teacher) p.set("teacher", filters.teacher);
+  if (filters.courseType) p.set("courseType", filters.courseType);
+  if (filters.isGeneralEducation) p.set("isGeneralEducation", filters.isGeneralEducation);
+  if (filters.geCategory) p.set("geCategory", filters.geCategory);
+  if (filters.targetDepartment) p.set("targetDepartment", filters.targetDepartment);
+  if (filters.requirement) p.set("requirement", filters.requirement);
+  if (filters.classificationSource)
+    p.set("classificationSource", filters.classificationSource);
+  if (filters.classificationConfidence)
+    p.set("classificationConfidence", filters.classificationConfidence);
   if (cursor) p.set("cursor", cursor);
   p.set("limit", "30");
   return `/api/courses?${p.toString()}`;
@@ -39,9 +48,9 @@ export function CourseList({
   q: string;
   filters: SearchFilters;
   isSelected: (id: string) => boolean;
-  onToggle: (course: CourseWithSessions) => void;
+  onToggle: (course: CourseWithSessionsAndMetadata) => void;
 }) {
-  const [items, setItems] = useState<CourseWithSessions[]>([]);
+  const [items, setItems] = useState<CourseWithSessionsAndMetadata[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [status, setStatus] = useState<Status>("loading");

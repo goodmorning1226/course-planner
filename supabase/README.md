@@ -12,6 +12,7 @@
 | `02_rls_policies.sql` | Row Level Security 政策。 |
 | `03_indexes.sql` | 搜尋／篩選用索引（含 `pg_trgm` 課名/教師模糊搜尋、`periods` 的 GIN）。 |
 | `04_seed_sample.sql` | **假的** 範例課程＋時段，僅供前端開發，非真實臺大資料。 |
+| `05_course_metadata.sql` | **課程分類 enrichment** 的附加表：`course_metadata`（通識/共同/院系所…）、`course_requirements`（對某系必/選修）。含 trigger / indexes / RLS（公開可讀、僅 service role 可寫）。**ADDITIVE**，可直接貼到已有資料的 DB 執行，不動既有表。`00_full_setup.sql` 也已包含。搭配 `npm run enrich`。 |
 
 ## 使用方式
 

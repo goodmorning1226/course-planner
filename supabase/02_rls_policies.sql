@@ -104,3 +104,6 @@ create policy "timetable_courses_delete_own"
 -- -----------------------------------------------------------------------------
 alter table public.scrape_runs enable row level security;
 -- intentionally no policies.
+
+-- course_metadata / course_requirements RLS (public read; service-role write)
+-- lives in 05_course_metadata.sql (also folded into 00_full_setup.sql).

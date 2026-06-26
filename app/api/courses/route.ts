@@ -6,7 +6,9 @@ import { apiError, rateLimited } from "@/lib/api-error";
 import type {
   Course,
   CourseSession,
-  CourseWithSessions,
+  CourseMetadata,
+  CourseRequirement,
+  CourseWithSessionsAndMetadata,
 } from "@/lib/courses/types";
 
 // GET /api/courses — search courses (reads our own DB, never NTU directly).
@@ -70,8 +72,12 @@ export async function GET(req: Request) {
   if (!parsed.success) {
     return apiError("invalid_request", "查詢參數不合法。");
   }
-  const { q, weekday, period, buildingOrCollege, teacher, cursor, limit } =
-    parsed.data;
+  const {
+    q, weekday, period, buildingOrCollege, teacher,
+    courseType, isGeneralEducation, geCategory, targetDepartment, requirement,
+    classificationSource, classificationConfidence,
+    cursor, limit,
+  } = parsed.data;
 
   // Multi-select filters: comma lists → arrays (OR within each group).
   const weekdays = weekday ? weekday.split(",").map(Number) : undefined;
@@ -94,6 +100,10 @@ export async function GET(req: Request) {
     const supabase = createPublicServerClient();
     const hasSessionFilter =
       (weekdays?.length ?? 0) > 0 || (periods?.length ?? 0) > 0;
+    const hasMetaFilter =
+      !!courseType || !!isGeneralEducation || !!geCategory ||
+      !!classificationSource || !!classificationConfidence;
+    const hasReqFilter = !!targetDepartment || !!requirement;
 
     // q also searches classroom (a session column): resolve matching course ids.
     let qClassroomIds: string[] = [];
@@ -109,10 +119,13 @@ export async function GET(req: Request) {
       );
     }
 
-    // Build the courses query.
-    const selectStr = hasSessionFilter
-      ? "*, course_sessions!inner(course_id)"
-      : "*";
+    // Build the courses query. Each active filter group adds an INNER embed so
+    // a course is included iff it has a matching child row.
+    const selectStr =
+      "*" +
+      (hasSessionFilter ? ", course_sessions!inner(course_id)" : "") +
+      (hasMetaFilter ? ", course_metadata!inner(course_id)" : "") +
+      (hasReqFilter ? ", course_requirements!inner(course_id)" : "");
     let cq = supabase.from("courses").select(selectStr);
 
     // (1) Session-level filters via embedded inner join (EXISTS semantics).
@@ -121,6 +134,21 @@ export async function GET(req: Request) {
     if (weekdays?.length) cq = cq.in("course_sessions.weekday", weekdays);
     if (periods?.length)
       cq = cq.overlaps("course_sessions.periods", periods);
+
+    // (1b) Classification filters (course_metadata, to-one).
+    if (courseType) cq = cq.eq("course_metadata.course_type_normalized", courseType);
+    if (isGeneralEducation)
+      cq = cq.eq("course_metadata.is_general_education", isGeneralEducation === "true");
+    if (geCategory) cq = cq.contains("course_metadata.ge_categories", [geCategory]);
+    if (classificationSource) cq = cq.eq("course_metadata.source", classificationSource);
+    if (classificationConfidence)
+      cq = cq.eq("course_metadata.confidence", classificationConfidence);
+
+    // (1c) Requirement filters (course_requirements, to-many).
+    if (targetDepartment)
+      cq = cq.ilike("course_requirements.target_department_name", `%${targetDepartment}%`);
+    if (requirement)
+      cq = cq.eq("course_requirements.requirement_normalized", requirement);
 
     // Course-level filters: building/college is an exact-label list (OR).
     if (buildings?.length) cq = cq.in("building_or_college", buildings);
@@ -157,26 +185,58 @@ export async function GET(req: Request) {
     const pageRows = hasMore ? rows.slice(0, limit) : rows;
     const nextCursor = hasMore ? encodeCursor(offset + limit) : null;
 
-    // (3) One query for all sessions of the returned page — no N+1.
+    // (3) Sessions + metadata + requirements for the returned page — 3 queries,
+    // no N+1.
     const pageIds = pageRows.map((r) => r.id);
     const sessionsByCourse = new Map<string, CourseSession[]>();
+    const metaByCourse = new Map<string, CourseMetadata>();
+    const reqsByCourse = new Map<string, CourseRequirement[]>();
     if (pageIds.length > 0) {
-      const { data: sessions, error: sErr } = await supabase
-        .from("course_sessions")
-        .select("*")
-        .in("course_id", pageIds);
-      if (sErr) throw sErr;
-      for (const s of (sessions ?? []) as CourseSession[]) {
+      const [sessR, metaR, reqR] = await Promise.all([
+        supabase.from("course_sessions").select("*").in("course_id", pageIds),
+        supabase.from("course_metadata").select("*").in("course_id", pageIds),
+        supabase.from("course_requirements").select("*").in("course_id", pageIds),
+      ]);
+      if (sessR.error) throw sessR.error;
+      // metadata / requirements are tolerant: if the enrichment tables aren't
+      // migrated yet, base search still works (courses just show 尚未分類).
+      if (metaR.error || reqR.error) {
+        console.warn("[/api/courses] classification tables unavailable:",
+          metaR.error?.message ?? reqR.error?.message);
+      }
+      for (const s of (sessR.data ?? []) as CourseSession[]) {
         const list = sessionsByCourse.get(s.course_id) ?? [];
         list.push(s);
         sessionsByCourse.set(s.course_id, list);
       }
+      for (const m of (metaR.data ?? []) as CourseMetadata[]) {
+        metaByCourse.set(m.course_id, m);
+      }
+      for (const r of (reqR.data ?? []) as CourseRequirement[]) {
+        const list = reqsByCourse.get(r.course_id) ?? [];
+        list.push(r);
+        reqsByCourse.set(r.course_id, list);
+      }
     }
 
-    const data: CourseWithSessions[] = pageRows.map((row) => {
-      // Strip the embedded join helper; keep only Course columns.
-      const { course_sessions: _omit, ...course } = row;
-      return { ...(course as Course), sessions: sessionsByCourse.get(course.id) ?? [] };
+    const data: CourseWithSessionsAndMetadata[] = pageRows.map((row) => {
+      // Strip the embedded join helpers; keep only Course columns.
+      const {
+        course_sessions: _s,
+        course_metadata: _m,
+        course_requirements: _r,
+        ...course
+      } = row as Course & {
+        course_sessions?: unknown;
+        course_metadata?: unknown;
+        course_requirements?: unknown;
+      };
+      return {
+        ...(course as Course),
+        sessions: sessionsByCourse.get(course.id) ?? [],
+        metadata: metaByCourse.get(course.id) ?? null,
+        requirements: reqsByCourse.get(course.id) ?? [],
+      };
     });
 
     // 11. Relevance ordering for the page when a query is present.

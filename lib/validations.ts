@@ -18,6 +18,20 @@ const cursorSchema = z
   .max(200)
   .regex(/^[A-Za-z0-9:_.\-]+$/, "cursor 格式不合法");
 
+// Allowed values for classification filters (mirror the DB check constraints).
+const COURSE_TYPE_VALUES = [
+  "common_required", "common_elective", "general_education", "departmental",
+  "college_departmental", "university_wide", "military", "freshman_seminar",
+  "freshman_lecture", "writing", "career_communication", "intercollegiate", "unknown",
+] as const;
+const REQUIREMENT_VALUES = [
+  "required", "elective", "required_elective", "optional_required",
+  "college_required", "college_elective", "common_required", "common_elective", "unknown",
+] as const;
+const SOURCE_VALUES = [
+  "official_1151", "historical_match", "course_code_inference", "unknown",
+] as const;
+
 /** Query params for GET /api/courses (course search). */
 export const courseSearchQuerySchema = z.object({
   q: z.string().trim().max(100, "搜尋字串最多 100 字").optional(),
@@ -33,6 +47,14 @@ export const courseSearchQuerySchema = z.object({
   // Comma-separated 建物/學院 labels (exact match list).
   buildingOrCollege: z.string().trim().max(300).optional(),
   teacher: z.string().trim().max(100).optional(),
+  // Classification filters (course_metadata / course_requirements).
+  courseType: z.enum(COURSE_TYPE_VALUES).optional(),
+  isGeneralEducation: z.enum(["true", "false"]).optional(),
+  geCategory: z.string().regex(/^A[1-8]$/, "geCategory 不合法").optional(),
+  targetDepartment: z.string().trim().max(100).optional(),
+  requirement: z.enum(REQUIREMENT_VALUES).optional(),
+  classificationSource: z.enum(SOURCE_VALUES).optional(),
+  classificationConfidence: z.enum(["high", "medium", "low", "unknown"]).optional(),
   cursor: cursorSchema.optional(),
   limit: z.coerce.number().int().min(1).max(50).default(30),
 });

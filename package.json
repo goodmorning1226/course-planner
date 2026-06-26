@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "scrape": "tsx scripts/scrape-ntu-classrooms.ts",
+    "enrich": "tsx scripts/enrich-course-metadata.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

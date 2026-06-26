@@ -131,3 +131,8 @@ create table if not exists public.scrape_runs (
 
 comment on table public.scrape_runs is
   'Scraper run log. Service-role only; no client access (RLS denies all).';
+
+-- -----------------------------------------------------------------------------
+-- course_metadata / course_requirements (classification enrichment) live in
+-- 05_course_metadata.sql (tables + triggers). 00_full_setup.sql also includes them.
+-- -----------------------------------------------------------------------------

@@ -1,10 +1,14 @@
 "use client";
 
-import type { CourseSession, CourseWithSessions } from "@/lib/courses/types";
+import type {
+  CourseSession,
+  CourseWithSessionsAndMetadata,
+} from "@/lib/courses/types";
 import { Card, Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { weekdayLabel, formatUpdatedAt } from "@/lib/utils";
 import { formatPeriods } from "@/lib/courses/periods";
+import { CourseClassification } from "./CourseClassification";
 
 // One course as a horizontal list row. Minimal-clean hierarchy:
 //   course name = primary; serial/section/teacher = secondary; time/room = meta.
@@ -14,9 +18,9 @@ export function CourseCard({
   isSelected = false,
   onToggle,
 }: {
-  course: CourseWithSessions;
+  course: CourseWithSessionsAndMetadata;
   isSelected?: boolean;
-  onToggle?: (course: CourseWithSessions) => void;
+  onToggle?: (course: CourseWithSessionsAndMetadata) => void;
 }) {
   // Course-level secondary facts, missing ones dropped.
   const meta = [
@@ -51,6 +55,12 @@ export function CourseCard({
         ) : (
           <p className="text-xs text-muted-foreground">尚無時段資料</p>
         )}
+
+        {/* Classification (course_metadata / course_requirements) */}
+        <CourseClassification
+          metadata={course.metadata}
+          requirements={course.requirements}
+        />
 
         {/* Subtle, non-shouty provenance hint */}
         <p className="text-[11px] text-muted-foreground/70">

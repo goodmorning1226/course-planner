@@ -79,6 +79,81 @@ export interface CourseWithSessions extends Course {
   sessions: CourseSession[];
 }
 
+// --- Classification / metadata enrichment -----------------------------------
+
+export type CourseTypeNormalized =
+  | "common_required"
+  | "common_elective"
+  | "general_education"
+  | "departmental"
+  | "college_departmental"
+  | "university_wide"
+  | "military"
+  | "freshman_seminar"
+  | "freshman_lecture"
+  | "writing"
+  | "career_communication"
+  | "intercollegiate"
+  | "unknown";
+
+export type RequirementNormalized =
+  | "required"
+  | "elective"
+  | "required_elective"
+  | "optional_required"
+  | "college_required"
+  | "college_elective"
+  | "common_required"
+  | "common_elective"
+  | "unknown";
+
+export type Confidence = "high" | "medium" | "low" | "unknown";
+
+/** The course's OWN classification (通識/共同/院系所…). One per course. */
+export interface CourseMetadata {
+  id: string;
+  course_id: string;
+  official_semester: string | null;
+  official_course_code: string | null;
+  official_course_identifier: string | null;
+  credits: number | null;
+  course_type_raw: string | null;
+  course_type_normalized: CourseTypeNormalized;
+  is_general_education: boolean;
+  ge_categories: string[];
+  ge_labels: string[];
+  ge_creditable: boolean | null;
+  source: string;
+  confidence: Confidence;
+  matched_semester: string | null;
+  matched_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Required/elective status relative to a target department/college. */
+export interface CourseRequirement {
+  id: string;
+  course_id: string;
+  target_department_name: string | null;
+  target_department_code: string | null;
+  target_college_name: string | null;
+  audience_raw: string | null;
+  requirement_raw: string | null;
+  requirement_normalized: RequirementNormalized;
+  source: string;
+  confidence: Confidence;
+  matched_semester: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Full course shape for the UI: sessions + classification. */
+export interface CourseWithSessionsAndMetadata extends CourseWithSessions {
+  metadata: CourseMetadata | null;
+  requirements: CourseRequirement[];
+}
+
 /** A membership row of `timetable_courses` — a course inside a timetable. */
 export interface TimetableCourse {
   id: string;
