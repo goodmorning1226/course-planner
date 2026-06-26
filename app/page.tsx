@@ -5,10 +5,7 @@ import { Card } from "@/components/ui/card";
 export default function HomePage() {
   return (
     <div className="space-y-10 py-6">
-      <section className="space-y-4">
-        <p className="inline-flex rounded-sm bg-muted px-2 py-1 text-xs text-muted-foreground">
-          非官方 · 臺大 115-1
-        </p>
+      <section className="flex flex-col items-center space-y-4 text-center">
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
           在正式課程網公告前，先排好你的暫定課表
         </h1>
@@ -17,7 +14,7 @@ export default function HomePage() {
           暫排課工具，資料整理自公開可查詢之臺大 115-1
           教室課表。你可以提前搜尋課程、加入暫排課表、卡好時段。資料為暫定且可能異動，正式課程資訊請以臺大課程網公告為準。
         </p>
-        <div className="flex flex-wrap gap-3 pt-2">
+        <div className="flex flex-wrap justify-center gap-3 pt-2">
           <Link href="/courses">
             <Button>開始搜尋課程</Button>
           </Link>

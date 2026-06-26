@@ -5,7 +5,7 @@ import { FooterNotice } from "@/components/layout/FooterNotice";
 import { DisclaimerDialog } from "@/components/disclaimer/DisclaimerDialog";
 
 export const metadata: Metadata = {
-  title: "課程暫排工具（非官方）｜臺大 115-1",
+  title: "急急排排 （NTU）",
   description:
     "非官方的臺大 115-1 暫排課工具。資料整理自公開可查詢之教室課表，僅供提前安排課程參考，正式資訊以臺大課程網公告為準。",
   robots: { index: true, follow: true },

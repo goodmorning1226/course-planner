@@ -16,10 +16,10 @@ export async function Navbar() {
 
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
-      <nav className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between px-4">
+      <nav className="flex h-14 w-full items-center justify-between px-10">
         <Link href="/" className="flex items-baseline gap-2">
-          <span className="text-base font-semibold tracking-tight">暫排課</span>
-          <span className="text-xs text-muted-foreground">非官方 · 115-1</span>
+          <span className="text-base font-semibold tracking-tight">急急排排</span>
+          <span className="text-xs text-muted-foreground">非官方 · 台大 115-1</span>
         </Link>
 
         <div className="flex items-center gap-1">
