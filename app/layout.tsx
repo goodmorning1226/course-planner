@@ -3,6 +3,7 @@ import "./globals.css";
 import { Navbar } from "@/components/layout/Navbar";
 import { FooterNotice } from "@/components/layout/FooterNotice";
 import { DisclaimerDialog } from "@/components/disclaimer/DisclaimerDialog";
+import { PageViewTracker } from "@/components/PageViewTracker";
 
 export const metadata: Metadata = {
   title: "急急排排 （NTU）",
@@ -25,6 +26,7 @@ export default function RootLayout({
         </main>
         <FooterNotice />
         <DisclaimerDialog />
+        <PageViewTracker />
       </body>
     </html>
   );

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { isAdminEmail } from "@/lib/admin";
 import { LogoutButton } from "./LogoutButton";
 
 // Plain wordmark only — deliberately no NTU logo / crest and no official styling.
@@ -41,6 +42,14 @@ export async function Navbar() {
               >
                 {user.email}
               </span>
+              {isAdminEmail(user.email) && (
+                <Link
+                  href="/admin"
+                  className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  後台
+                </Link>
+              )}
               <LogoutButton />
             </>
           ) : (

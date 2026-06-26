@@ -119,6 +119,12 @@ export interface CourseMetadata {
   credits: number | null;
   course_type_raw: string | null;
   course_type_normalized: CourseTypeNormalized;
+  /** 課程網分類 slugs (multi): dept/general/common/pearmy/program/… */
+  categories: string[];
+  /** 開課系所代碼 (courseTargets.department.id), 可多個 */
+  dept_codes: string[];
+  /** 系所年級 buckets: "<deptCode>:<gradeId>" tokens */
+  dept_grades: string[];
   is_general_education: boolean;
   ge_categories: string[];
   ge_labels: string[];

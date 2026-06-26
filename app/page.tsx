@@ -1,8 +1,28 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { createPublicServerClient } from "@/lib/supabase/server";
+import { formatUpdatedAt } from "@/lib/utils";
 
-export default function HomePage() {
+// Most recent courses.scraped_at — shown on the home page.
+async function getLastScrapedAt(): Promise<string | null> {
+  try {
+    const supabase = createPublicServerClient();
+    const { data } = await supabase
+      .from("courses")
+      .select("scraped_at")
+      .order("scraped_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data?.scraped_at ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export default async function HomePage() {
+  const lastUpdatedAt = await getLastScrapedAt();
+
   return (
     <div className="space-y-10 py-6">
       <section className="flex flex-col items-center space-y-4 text-center">
@@ -22,6 +42,10 @@ export default function HomePage() {
             <Button variant="outline">查看我的課表</Button>
           </Link>
         </div>
+        <p className="text-xs text-muted-foreground">
+          資料最後更新：
+          {lastUpdatedAt ? formatUpdatedAt(lastUpdatedAt) : "尚未取得"}
+        </p>
       </section>
 
       <section className="grid gap-4 sm:grid-cols-3">

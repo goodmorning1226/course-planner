@@ -6,7 +6,7 @@ import type {
 } from "@/lib/courses/types";
 import { Card, Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { weekdayLabel, formatUpdatedAt } from "@/lib/utils";
+import { weekdayLabel } from "@/lib/utils";
 import { formatPeriods } from "@/lib/courses/periods";
 import { CourseClassification } from "./CourseClassification";
 
@@ -61,11 +61,6 @@ export function CourseCard({
           metadata={course.metadata}
           requirements={course.requirements}
         />
-
-        {/* Subtle, non-shouty provenance hint */}
-        <p className="text-[11px] text-muted-foreground/70">
-          暫定資料　·　最後爬取 {formatUpdatedAt(course.scraped_at)}
-        </p>
       </div>
 
       {/* Action: clear add / added + remove */}

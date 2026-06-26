@@ -74,10 +74,14 @@ export async function GET(req: Request) {
   }
   const {
     q, weekday, period, buildingOrCollege, teacher,
-    courseType, isGeneralEducation, geCategory, targetDepartment, requirement,
+    courseType, dept, deptGrade,
+    isGeneralEducation, geCategory, targetDepartment, requirement,
     classificationSource, classificationConfidence,
     cursor, limit,
   } = parsed.data;
+
+  // 系所大類: dept codes (OR) via array-overlaps on course_metadata.dept_codes.
+  const deptCodes = dept ? dept.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
 
   // Multi-select filters: comma lists → arrays (OR within each group).
   const weekdays = weekday ? weekday.split(",").map(Number) : undefined;
@@ -102,7 +106,8 @@ export async function GET(req: Request) {
       (weekdays?.length ?? 0) > 0 || (periods?.length ?? 0) > 0;
     const hasMetaFilter =
       !!courseType || !!isGeneralEducation || !!geCategory ||
-      !!classificationSource || !!classificationConfidence;
+      !!classificationSource || !!classificationConfidence ||
+      (deptCodes?.length ?? 0) > 0 || !!deptGrade;
     const hasReqFilter = !!targetDepartment || !!requirement;
 
     // q also searches classroom (a session column): resolve matching course ids.
@@ -136,7 +141,12 @@ export async function GET(req: Request) {
       cq = cq.overlaps("course_sessions.periods", periods);
 
     // (1b) Classification filters (course_metadata, to-one).
-    if (courseType) cq = cq.eq("course_metadata.course_type_normalized", courseType);
+    if (courseType) cq = cq.contains("course_metadata.categories", [courseType]);
+    // 系所大類: any of the selected departments (overlaps); a single dept may
+    // additionally narrow to a 年級 bucket (contains the deptCode:gradeId token).
+    if (deptCodes?.length)
+      cq = cq.overlaps("course_metadata.dept_codes", deptCodes);
+    if (deptGrade) cq = cq.contains("course_metadata.dept_grades", [deptGrade]);
     if (isGeneralEducation)
       cq = cq.eq("course_metadata.is_general_education", isGeneralEducation === "true");
     if (geCategory) cq = cq.contains("course_metadata.ge_categories", [geCategory]);

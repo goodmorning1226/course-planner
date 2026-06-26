@@ -173,11 +173,32 @@ npm run enrich
 > **風險聲明：** 通識、共同、必選修等分類**會影響畢業/選課判斷**。若來源不是
 > `official_1151`，僅供參考，正式資訊一律以臺大課程網公告為準。
 
-**維護：** 115-1 課程網正式公告後重跑 `npm run enrich`，可把分類更新為高可信度；
-仍不確定的就維持「尚未分類」，不猜。
+**維護：** 115-1 課程網正式公告後執行 `NOL_SEMESTER=115-1 npm run enrich`，可把分類
+更新為官方/高可信度；仍不確定的就維持「尚未分類」，不猜。
 
-> 目前 `fetchClassification()`（script 內）是**唯一待接的整合點** —— NTU 課程網
-> （官方/歷史）來源尚未接上，所以現在跑 enrich 會把所有課維持「尚未分類」。
+來源：[`scripts/nol-catalog.ts`](scripts/nol-catalog.ts) 讀 `nol.ntu.edu.tw` 課程網
+（UTF-8、無 WAF），以「課程識別碼 + 班次」對應到我們的 `pk`。通識領域 A1–A8 取自
+課程網「備註」的官方標記（如 `兼通識A4`），**不靠課名猜測**。可用環境變數：
+`NOL_SEMESTER`（預設 114-1）、`NOL_DEPTS`（限定系所，測試用）、`ENRICH_ONLY_NEW=1`
+（只分類沒有 metadata 的新課）、`ENRICH_DRY_RUN=1`。
+
+## 六之三、管理後台 / 一鍵爬取
+
+`/admin` 是只給管理員的後台：資料指標(課程數、使用者、瀏覽數…)＋一鍵重新爬取。
+
+設定：先在 SQL Editor 貼 [`supabase/06_admin.sql`](supabase/06_admin.sql)（建
+`scrape_progress` / `site_stats`），再把你的 email 加進 `ADMIN_EMAILS`。登入該帳號後
+navbar 會出現「後台」。
+
+「**重新爬取**」按鈕會重爬全部建物(每棟一條進度條)、**只更新有變動的課**、爬完
+**只分類新課**(`ENRICH_ONLY_NEW`)。
+
+> ⚠️ **serverless 限制**：一鍵爬取是後端 `spawn` 那支 30+ 分鐘的 Playwright 爬蟲，
+> 需要**長時間執行的 Node 主機**（本機 / 自架 / 容器）。**Vercel 等 serverless function
+> 會逾時、無法跑**。在 serverless 部署時，請改成由 **worker / 排程** 執行
+> `npm run scrape && ENRICH_ONLY_NEW=1 npm run enrich`（例如 GitHub Actions cron、
+> 一台小 VM、或 Render/Railway 背景 worker）；爬蟲照樣把每棟進度寫進 `scrape_progress`，
+> 後台進度條照常顯示。後台按鈕在那種環境可改成「呼叫該 worker」而非直接 spawn。
 
 ## 七、隱私說明
 

@@ -11,6 +11,23 @@ import type {
   RequirementNormalized,
 } from "./types";
 
+// --- Course網 categories (multi; a course can be in several) -----------------
+
+export const COURSE_CATEGORIES: { slug: string; label: string }[] = [
+  { slug: "dept", label: "系所" },
+  { slug: "general", label: "通識/溝通" },
+  { slug: "common", label: "共同/新生" },
+  { slug: "pearmy", label: "體育/國防" },
+  { slug: "program", label: "學程" },
+  { slug: "expertise", label: "領域專長" },
+  { slug: "interschool", label: "校際" },
+  { slug: "english", label: "進階英語" },
+];
+
+export const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
+  COURSE_CATEGORIES.map((c) => [c.slug, c.label])
+);
+
 // --- General-education areas (A1–A8) ----------------------------------------
 
 export const GE_AREA_LABELS: Record<string, string> = {

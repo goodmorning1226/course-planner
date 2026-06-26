@@ -190,6 +190,7 @@ create table if not exists public.course_metadata (
       'common_required','common_elective','general_education','departmental',
       'college_departmental','university_wide','military','freshman_seminar',
       'freshman_lecture','writing','career_communication','intercollegiate','unknown')),
+  categories                 text[] not null default '{}',
   is_general_education        boolean not null default false,
   ge_categories              text[] not null default '{}',
   ge_labels                  text[] not null default '{}',
@@ -238,6 +239,7 @@ create index if not exists idx_course_metadata_course    on public.course_metada
 create index if not exists idx_course_metadata_type      on public.course_metadata (course_type_normalized);
 create index if not exists idx_course_metadata_ge        on public.course_metadata (is_general_education);
 create index if not exists idx_course_metadata_ge_cats   on public.course_metadata using gin (ge_categories);
+create index if not exists idx_course_metadata_categories on public.course_metadata using gin (categories);
 create index if not exists idx_course_metadata_source    on public.course_metadata (source);
 create index if not exists idx_course_metadata_confidence on public.course_metadata (confidence);
 create index if not exists idx_course_req_course         on public.course_requirements (course_id);

@@ -43,6 +43,7 @@ create table if not exists public.course_metadata (
       'college_departmental','university_wide','military','freshman_seminar',
       'freshman_lecture','writing','career_communication','intercollegiate','unknown'
     )),
+  categories                 text[] not null default '{}',
   is_general_education        boolean not null default false,
   ge_categories              text[] not null default '{}',  -- e.g. {A1,A7}
   ge_labels                  text[] not null default '{}',  -- e.g. {文學與藝術}
@@ -108,6 +109,7 @@ create index if not exists idx_course_metadata_course      on public.course_meta
 create index if not exists idx_course_metadata_type         on public.course_metadata (course_type_normalized);
 create index if not exists idx_course_metadata_ge           on public.course_metadata (is_general_education);
 create index if not exists idx_course_metadata_ge_cats      on public.course_metadata using gin (ge_categories);
+create index if not exists idx_course_metadata_categories   on public.course_metadata using gin (categories);
 create index if not exists idx_course_metadata_source       on public.course_metadata (source);
 create index if not exists idx_course_metadata_confidence   on public.course_metadata (confidence);
 

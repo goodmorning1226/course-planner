@@ -18,11 +18,10 @@ const cursorSchema = z
   .max(200)
   .regex(/^[A-Za-z0-9:_.\-]+$/, "cursor 格式不合法");
 
-// Allowed values for classification filters (mirror the DB check constraints).
-const COURSE_TYPE_VALUES = [
-  "common_required", "common_elective", "general_education", "departmental",
-  "college_departmental", "university_wide", "military", "freshman_seminar",
-  "freshman_lecture", "writing", "career_communication", "intercollegiate", "unknown",
+// Course網 category slugs (the 課程大類 filter is now multi-category).
+const CATEGORY_SLUGS = [
+  "dept", "general", "common", "pearmy", "program",
+  "expertise", "interschool", "english",
 ] as const;
 const REQUIREMENT_VALUES = [
   "required", "elective", "required_elective", "optional_required",
@@ -48,7 +47,11 @@ export const courseSearchQuerySchema = z.object({
   buildingOrCollege: z.string().trim().max(300).optional(),
   teacher: z.string().trim().max(100).optional(),
   // Classification filters (course_metadata / course_requirements).
-  courseType: z.enum(COURSE_TYPE_VALUES).optional(),
+  courseType: z.enum(CATEGORY_SLUGS).optional(), // category slug
+  // 系所大類: one or many dept codes (e.g. "1010,2010"); 4-char alnum codes.
+  dept: z.string().regex(/^[0-9A-Za-z]{3,5}(,[0-9A-Za-z]{3,5})*$/, "dept 不合法").optional(),
+  // 系所年級 bucket: single "<deptCode>:<gradeId>" token.
+  deptGrade: z.string().regex(/^[0-9A-Za-z]{3,5}:.{1,3}$/, "deptGrade 不合法").optional(),
   isGeneralEducation: z.enum(["true", "false"]).optional(),
   geCategory: z.string().regex(/^A[1-8]$/, "geCategory 不合法").optional(),
   targetDepartment: z.string().trim().max(100).optional(),

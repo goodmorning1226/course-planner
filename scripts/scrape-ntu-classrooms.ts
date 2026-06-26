@@ -351,6 +351,108 @@ async function persistCourse(supabase: SupabaseClient, course: ParsedCourse) {
 }
 
 // ---------------------------------------------------------------------------
+// Progress + change-detection (for the admin one-click scrape)
+// ---------------------------------------------------------------------------
+
+/** Live per-building progress row for the admin UI. */
+async function setProgress(
+  supabase: SupabaseClient,
+  runId: string,
+  building: string,
+  fields: Partial<{
+    scraped_count: number;
+    total_count: number;
+    done_rooms: number;
+    status: string;
+  }>
+) {
+  await supabase
+    .from("scrape_progress")
+    .upsert({ run_id: runId, building, ...fields }, { onConflict: "run_id,building" });
+}
+
+/** Signature of a course's header + sessions, to detect "did it change?". */
+function courseSignature(c: {
+  building_or_college: string;
+  course_name: string;
+  class_group: string | null;
+  teacher: string | null;
+  sessionSigs: string[];
+}): string {
+  return (
+    [c.building_or_college, c.course_name, c.class_group ?? "", c.teacher ?? ""].join("|") +
+    "::" +
+    [...c.sessionSigs].sort().join(";")
+  );
+}
+function parsedSignature(c: ParsedCourse): string {
+  return courseSignature({
+    building_or_college: c.building_or_college,
+    course_name: c.course_name,
+    class_group: c.class_group,
+    teacher: c.teacher,
+    sessionSigs: [...c.sessions.values()].map(
+      (s) => `${s.weekday ?? ""}|${s.raw_time_text ?? ""}|${s.classroom ?? ""}|${s.periods.join(",")}`
+    ),
+  });
+}
+
+/** Existing courses' signatures keyed by pk (for change detection). */
+async function loadExistingSignatures(
+  supabase: SupabaseClient
+): Promise<Map<string, string>> {
+  const sigs = new Map<string, string>();
+  const PAGE = 1000;
+  // courses
+  const headers = new Map<string, { id: string; sig: string; sessions: string[] }>();
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("courses")
+      .select("id, pk, building_or_college, course_name, class_group, teacher")
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    for (const r of rows) {
+      if (!r.pk) continue;
+      headers.set(r.id as string, {
+        id: r.id as string,
+        sig: [r.building_or_college ?? "", r.course_name, r.class_group ?? "", r.teacher ?? ""].join("|"),
+        sessions: [],
+      });
+      sigs.set(r.pk as string, r.id as string); // temp: pk -> id
+    }
+    if (rows.length < PAGE) break;
+  }
+  // sessions
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("course_sessions")
+      .select("course_id, weekday, raw_time_text, classroom, periods")
+      .order("course_id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    for (const s of rows) {
+      const h = headers.get(s.course_id as string);
+      if (h)
+        h.sessions.push(
+          `${s.weekday ?? ""}|${s.raw_time_text ?? ""}|${s.classroom ?? ""}|${(s.periods ?? []).join(",")}`
+        );
+    }
+    if (rows.length < PAGE) break;
+  }
+  // final: pk -> full signature
+  const out = new Map<string, string>();
+  const idToHeader = new Map([...headers.values()].map((h) => [h.id, h]));
+  for (const [pk, id] of sigs) {
+    const h = idToHeader.get(id as string);
+    if (h) out.set(pk, h.sig + "::" + [...h.sessions].sort().join(";"));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -364,15 +466,25 @@ async function main() {
     console.warn("[scrape] Supabase env missing — switching to DRY RUN.");
   }
 
-  let runId: string | null = null;
+  // The admin one-click trigger passes SCRAPE_RUN_ID so it can poll progress.
+  const presetRunId = process.env.SCRAPE_RUN_ID || null;
+  let runId: string | null = presetRunId;
   if (writable) {
     const { data } = await writable
       .from("scrape_runs")
-      .insert({ semester: DB_SEMESTER, status: "running" })
+      .insert({
+        ...(presetRunId ? { id: presetRunId } : {}),
+        semester: DB_SEMESTER,
+        status: "running",
+      })
       .select("id")
       .single();
-    runId = (data?.id as string) ?? null;
+    runId = (data?.id as string) ?? presetRunId;
   }
+
+  // Existing signatures → only write courses whose data actually changed.
+  const existing = writable ? await loadExistingSignatures(writable) : new Map<string, string>();
+  console.log(`[scrape] loaded ${existing.size} existing course signatures.`);
 
   let browser: Browser | null = null;
   const skipped: string[] = [];
@@ -381,6 +493,7 @@ async function main() {
   let totalCourses = 0;
   let totalSessions = 0;
   let written = 0;
+  let unchanged = 0;
 
   try {
     browser = await chromium.launch({ headless: true });
@@ -408,9 +521,14 @@ async function main() {
       }
       if (MAX_ROOMS > 0 && rooms.length > MAX_ROOMS) rooms = rooms.slice(0, MAX_ROOMS);
       console.log(`[scrape] building ${label}: ${rooms.length} rooms`);
+      if (writable && runId)
+        await setProgress(writable, runId, label, {
+          total_count: rooms.length, done_rooms: 0, scraped_count: 0, status: "running",
+        });
       await sleep(REQUEST_DELAY_MS);
 
       const buildingCourses = new Map<string, ParsedCourse>();
+      let roomIdx = 0;
       for (const room of rooms) {
         try {
           const raw = await fetchRoomCourses(ctx, value, room); // query by value
@@ -420,6 +538,11 @@ async function main() {
           skipped.push(`room ${label}/${room}: ${(err as Error).message}`);
           console.warn(`[scrape] skip ${label}/${room}: ${(err as Error).message}`);
         }
+        roomIdx++;
+        if (writable && runId)
+          await setProgress(writable, runId, label, {
+            done_rooms: roomIdx, scraped_count: buildingCourses.size,
+          });
         await sleep(REQUEST_DELAY_MS); // gentle, sequential
       }
 
@@ -435,7 +558,14 @@ async function main() {
       let bWritten = 0;
       for (const course of list) {
         try {
+          // Only write when the course's data actually changed (or is new).
+          const sig = parsedSignature(course);
+          if (existing.get(course.pk) === sig) {
+            unchanged++;
+            continue;
+          }
           await persistCourse(writable, course);
+          existing.set(course.pk, sig);
           written++;
           bWritten++;
         } catch (err) {
@@ -443,14 +573,18 @@ async function main() {
           console.warn(`[scrape] persist failed: ${(err as Error).message}`);
         }
       }
+      if (runId)
+        await setProgress(writable, runId, label, {
+          scraped_count: list.length, done_rooms: rooms.length, status: "done",
+        });
       console.log(
-        `[scrape] ${label}: persisted ${bWritten}/${list.length} courses (total ${written}).`
+        `[scrape] ${label}: ${bWritten} changed/new, ${list.length - bWritten} unchanged (total written ${written}).`
       );
     }
 
     console.log(
       `[scrape] parsed ${totalCourses} courses / ${totalSessions} sessions ` +
-        `from ${requests} requests (${skipped.length} skipped).`
+        `from ${requests} requests (${written} changed, ${unchanged} unchanged, ${skipped.length} skipped).`
     );
 
     if (!writable) {

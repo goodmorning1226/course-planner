@@ -22,18 +22,11 @@ function buildUrl(q: string, filters: SearchFilters, cursor: string | null) {
   if (q) p.set("q", q);
   if (filters.weekday?.length) p.set("weekday", filters.weekday.join(","));
   if (filters.period?.length) p.set("period", filters.period.join(","));
-  if (filters.buildingOrCollege?.length)
-    p.set("buildingOrCollege", filters.buildingOrCollege.join(","));
-  if (filters.teacher) p.set("teacher", filters.teacher);
   if (filters.courseType) p.set("courseType", filters.courseType);
+  if (filters.depts?.length) p.set("dept", filters.depts.join(","));
+  if (filters.deptGrade) p.set("deptGrade", filters.deptGrade);
   if (filters.isGeneralEducation) p.set("isGeneralEducation", filters.isGeneralEducation);
   if (filters.geCategory) p.set("geCategory", filters.geCategory);
-  if (filters.targetDepartment) p.set("targetDepartment", filters.targetDepartment);
-  if (filters.requirement) p.set("requirement", filters.requirement);
-  if (filters.classificationSource)
-    p.set("classificationSource", filters.classificationSource);
-  if (filters.classificationConfidence)
-    p.set("classificationConfidence", filters.classificationConfidence);
   if (cursor) p.set("cursor", cursor);
   p.set("limit", "30");
   return `/api/courses?${p.toString()}`;
