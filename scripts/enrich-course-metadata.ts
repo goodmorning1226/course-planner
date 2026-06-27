@@ -16,7 +16,7 @@
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 import { resolve } from "node:path";
 import { fetchNtuCatalog, fetchDeptGrades, type NtuInfo } from "./ntu-course-api";
 import { GE_AREA_LABELS } from "../lib/courses/classification";
@@ -39,10 +39,22 @@ const ONLY_NEW =
   process.env.ENRICH_ONLY_NEW === "1" || process.env.ENRICH_ONLY_NEW === "true";
 const SKIP_GRADES =
   process.env.ENRICH_SKIP_GRADES === "1" || process.env.ENRICH_SKIP_GRADES === "true";
+// FORCE bypasses the don't-downgrade safeguard — re-derives every course from
+// THIS crawl. Use only with a verified-healthy full crawl (e.g. to apply changed
+// matching rules). Normal/admin runs leave it off so flaky crawls can't downgrade.
+const FORCE =
+  process.env.ENRICH_FORCE === "1" || process.env.ENRICH_FORCE === "true";
+
+// Sources that count as a CONFIRMED classification (code match / official /
+// explicit override). Name-matches and inference are NOT confirmed, so the
+// safeguard lets a later run re-evaluate them.
+const CONFIRMED_SOURCES = new Set(["historical_match", "official_1151"]);
+const NAME_MATCH_SOURCE = "historical_name_match";
 
 const IS_OFFICIAL = SEMESTER === "115-1";
 const SOURCE = IS_OFFICIAL ? "official_1151" : "historical_match";
 const CONFIDENCE: Confidence = IS_OFFICIAL ? "high" : "medium";
+const NOW = new Date().toISOString(); // one stamp for the whole run
 
 interface CourseRow {
   id: string;
@@ -62,8 +74,8 @@ interface NameOverride {
   set?: { categories: string[]; ge?: string[]; credits?: number };
 }
 const NAME_OVERRIDES: NameOverride[] = [
-  // 大學英文 is filed under 系所 but is a 共同(common) requirement.
-  { match: (n) => n.startsWith("大學英文"), add: ["common"] },
+  // 大學英文 = renamed 英文一 等 → 共同必修 (categories=[common] → common_required).
+  { match: (n) => n.startsWith("大學英文"), set: { categories: ["common"] } },
   // 邁向太空 = 114-1「認識星空」(通識 A7 物質科學, 2 學分) 改名而來，非系所課程。
   { match: (n) => n === "邁向太空", set: { categories: ["general"], ge: ["A7"], credits: 2 } },
   // AI 時代的職場協作 = 114-1「數位時代的職場寫作」改名；選修・兼通識 A5・領導學程。
@@ -79,6 +91,35 @@ function loadEnv() {
           process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, "");
       }
     } catch { /* absent */ }
+  }
+}
+
+/** Run an async fn over `items` in chunks of `size`, sequentially. */
+async function batched<T>(items: T[], size: number, fn: (chunk: T[]) => Promise<void>) {
+  for (let i = 0; i < items.length; i += size) {
+    await fn(items.slice(i, i + size));
+  }
+}
+
+/** Await a Supabase call, retrying a few times on a transient {error} or throw. */
+async function withRetry(
+  fn: () => PromiseLike<{ error: unknown }>,
+  label: string,
+  attempts = 4
+): Promise<void> {
+  for (let a = 1; ; a++) {
+    let err: unknown;
+    try {
+      err = (await fn()).error;
+    } catch (e) {
+      err = e;
+    }
+    if (!err) return;
+    if (a >= attempts) {
+      const msg = (err as { message?: string })?.message ?? String(err);
+      throw new Error(`${label} failed after ${attempts} attempts: ${msg}`);
+    }
+    await new Promise((r) => setTimeout(r, 500 * a));
   }
 }
 
@@ -106,6 +147,7 @@ async function readAllCourses(supabase: SupabaseClient): Promise<CourseRow[]> {
 }
 
 function deriveType(categories: string[], geSize: number): CourseTypeNormalized {
+  if (categories.includes("uncategorized")) return "unknown";
   if (geSize > 0 || categories.includes("general")) return "general_education";
   if (categories.includes("common")) return "common_required";
   if (categories.includes("pearmy")) return "military";
@@ -125,8 +167,7 @@ function normReq(compulsory: boolean | null): RequirementNormalized {
 // Many courses are renamed slightly between semesters, so an exact pk match
 // against 114-1 fails. We recover them by (1) name similarity and (2) the user's
 // hint that a renamed course often keeps the SAME time slot — a strong auxiliary
-// signal. Sentinel GE area for general courses whose 領域 we can't determine.
-const GE_UNDETERMINED = "未確定";
+// signal. Courses that still can't be placed go to the 未分類 大類 (not 通識).
 
 function normName(s: string): string {
   return s.replace(/\s+/g, "").replace(/[()（）]/g, "").trim().toLowerCase();
@@ -194,8 +235,8 @@ function mergeInfos(list: NtuInfo[]): NtuInfo {
 
 /**
  * Find a 114-1 catalog entry for a renamed course by name similarity, using a
- * shared time slot as an auxiliary boost. Returns null if nothing is similar
- * enough (caller then treats the course as 通識/未確定).
+ * shared time slot as an auxiliary aid. Returns null if nothing is similar
+ * enough (caller then treats the course as 未分類).
  */
 function matchByName(
   idx: NameIndex,
@@ -213,42 +254,58 @@ function matchByName(
     return mergeInfos(slotted.length ? slotted : exact);
   }
 
-  // 2) Fuzzy: 2-char shingle Jaccard, +0.25 when the time slot also matches.
+  // 2) Fuzzy: 2-char shingle Jaccard. Require real name overlap (≥0.4 floor) so
+  // the time-slot aid can only CONFIRM a plausible match, never carry a weak one
+  // (else near-homographs like 大學英文 vs 大學國文 mis-match). Accept ≥0.55.
   const sh = shingles(norm);
   let best: NtuInfo | null = null;
   let bestScore = 0;
   for (const e of idx.entries) {
-    let score = jaccard(sh, e.sh);
-    if (score < 0.25) continue; // far too different to consider
-    if (ourSlots.size && overlaps(e.info.slots, ourSlots)) score += 0.25;
+    const sim = jaccard(sh, e.sh);
+    if (sim < 0.4) continue; // need genuine name overlap
+    let score = sim;
+    if (ourSlots.size && overlaps(e.info.slots, ourSlots)) score += 0.2; // time aid
     if (score > bestScore) {
       bestScore = score;
       best = e.info;
     }
   }
-  return bestScore >= 0.5 ? best : null;
+  return bestScore >= 0.55 ? best : null;
 }
 
 type Tier = "pk" | "name" | "none";
+type Outcome = "pk" | "name" | "none" | "override" | "protected";
 
-async function persist(
-  supabase: SupabaseClient,
+interface ClassResult {
+  outcome: Outcome;
+  metaRow?: Record<string, unknown>; // absent when protected (skip write)
+  reqRows?: Record<string, unknown>[];
+}
+
+/**
+ * PURE classification — computes the metadata row + requirement rows for a
+ * course WITHOUT touching the DB (the caller batch-writes them). Returns
+ * outcome "protected" with no rows when the safeguard says keep the existing
+ * confident classification.
+ */
+function classify(
   courseId: string,
   courseName: string | null,
   info: NtuInfo | null,
   tier: Tier,
   deptGrades: string[],
-  existingConf: Confidence | null
-): Promise<"pk" | "name" | "none" | "override" | "protected"> {
+  existingSource: string | null
+): ClassResult {
   const override = courseName ? NAME_OVERRIDES.find((o) => o.match(courseName)) : undefined;
 
   // SAFEGUARD: a code (pk) match or an explicit override is authoritative; any
-  // other outcome is a lower-confidence guess. Never let a guess overwrite an
-  // already-confident classification — so a transient catalog-crawl hiccup that
-  // drops a confirmed course can't silently re-bucket it into 通識/未確定.
+  // other outcome (name-match, 未分類) is a guess. Never let a guess overwrite a
+  // CONFIRMED classification — so a transient catalog-crawl hiccup that drops a
+  // confirmed course can't silently re-bucket it. Keyed on the existing SOURCE
+  // (not confidence) so name-matches stay re-evaluatable. FORCE bypasses it.
   const authoritative = !!override?.set || tier === "pk";
-  if (!authoritative && (existingConf === "medium" || existingConf === "high")) {
-    return "protected";
+  if (!FORCE && !authoritative && existingSource && CONFIRMED_SOURCES.has(existingSource)) {
+    return { outcome: "protected" };
   }
 
   // Base classification, in priority order:
@@ -277,56 +334,58 @@ async function persist(
     src = SOURCE;
     conf = CONFIDENCE;
   } else if (info && tier === "name") {
+    // Recognised rename (name + same-time-slot) → belongs in its real 大類,
+    // shown as 確定 (medium) but a DISTINCT source so the safeguard treats it as
+    // re-evaluatable, not a locked-in confirmation.
     categories = [...info.categories];
     ge = [...info.ge].sort();
     credits = info.credits;
     deptCodes = [...info.depts];
-    src = "historical_match";
-    conf = "low"; // name-based, lower trust than a pk match
+    src = NAME_MATCH_SOURCE;
+    conf = "medium";
   } else {
-    categories = ["general"]; // unconfirmed 系所 → 通識
-    ge = [GE_UNDETERMINED];
+    // No confident match and not a recognisable rename → 未分類 大類 (不確定).
+    // NOT guessed into 通識.
+    categories = ["uncategorized"];
+    ge = [];
     credits = null;
     deptCodes = [];
     src = "course_code_inference";
     conf = "low";
   }
-  // `add` overrides layer on top (e.g. 大學英文 → +common).
+  // `add` overrides layer on top.
   if (override?.add) {
     const set = new Set(categories);
     for (const c of override.add) set.add(c);
     categories = [...set];
   }
+  // 未分類 is an EXCLUSIVE fallback — if any real category is present, drop it.
+  if (categories.length > 1) categories = categories.filter((c) => c !== "uncategorized");
   const known = !!override?.set || !!info;
 
-  const { error: metaErr } = await supabase.from("course_metadata").upsert(
-    {
-      course_id: courseId,
-      official_semester: SEMESTER,
-      official_course_code: null,
-      official_course_identifier: null,
-      credits,
-      course_type_raw: null,
-      course_type_normalized: deriveType(categories, ge.length),
-      categories,
-      dept_codes: deptCodes,
-      dept_grades: deptGrades,
-      is_general_education: ge.length > 0,
-      ge_categories: ge,
-      ge_labels: ge.map((c) => GE_AREA_LABELS[c]).filter(Boolean),
-      ge_creditable: ge.length > 0 && !ge.includes(GE_UNDETERMINED) ? true : null,
-      source: src,
-      confidence: conf,
-      matched_semester: known ? SEMESTER : null,
-      matched_at: new Date().toISOString(),
-    },
-    { onConflict: "course_id" }
-  );
-  if (metaErr) throw new Error(`metadata: ${metaErr.message}`);
+  const metaRow = {
+    course_id: courseId,
+    official_semester: SEMESTER,
+    official_course_code: null,
+    official_course_identifier: null,
+    credits,
+    course_type_raw: null,
+    course_type_normalized: deriveType(categories, ge.length),
+    categories,
+    dept_codes: deptCodes,
+    dept_grades: deptGrades,
+    is_general_education: ge.length > 0,
+    ge_categories: ge,
+    ge_labels: ge.map((c) => GE_AREA_LABELS[c]).filter(Boolean),
+    ge_creditable: ge.length > 0 ? true : null,
+    source: src,
+    confidence: conf,
+    matched_semester: known ? SEMESTER : null,
+    matched_at: NOW,
+  };
 
-  await supabase.from("course_requirements").delete().eq("course_id", courseId);
   const seen = new Set<string>();
-  const reqs = (info?.requirements ?? [])
+  const reqRows = (info?.requirements ?? [])
     .map((r) => ({
       course_id: courseId,
       target_department_name: r.dept,
@@ -345,11 +404,8 @@ async function persist(
       seen.add(k);
       return true;
     });
-  if (reqs.length > 0) {
-    const { error } = await supabase.from("course_requirements").insert(reqs);
-    if (error) throw new Error(`requirements: ${error.message}`);
-  }
-  return override?.set ? "override" : tier;
+
+  return { outcome: override?.set ? "override" : tier, metaRow, reqRows };
 }
 
 async function main() {
@@ -426,28 +482,30 @@ async function main() {
   }
   const nameIndex = buildNameIndex(catalog);
 
-  // Existing per-course state: confidence (safeguard reads it to avoid
-  // downgrading) and dept_grades (preserved when this run skips/loses the
+  // Existing per-course state: source (safeguard keys on it — protect only
+  // CONFIRMED sources) and dept_grades (preserved when this run skips/loses the
   // fragile grade crawl, so we never wipe grade buckets).
-  const existingConf = new Map<string, Confidence>();
+  const existingSource = new Map<string, string>();
   const existingGrades = new Map<string, string[]>();
   for (let from = 0; ; from += 1000) {
     const { data } = await supabase
       .from("course_metadata")
-      .select("course_id, confidence, dept_grades")
+      .select("course_id, source, dept_grades")
       .range(from, from + 999);
-    const rows = (data ?? []) as { course_id: string; confidence: Confidence; dept_grades: string[] | null }[];
+    const rows = (data ?? []) as { course_id: string; source: string | null; dept_grades: string[] | null }[];
     for (const r of rows) {
-      existingConf.set(r.course_id, r.confidence);
+      if (r.source) existingSource.set(r.course_id, r.source);
       if (r.dept_grades?.length) existingGrades.set(r.course_id, r.dept_grades);
     }
     if (rows.length < 1000) break;
   }
 
   const counts = { pk: 0, name: 0, none: 0, override: 0, protected: 0 };
-  const skipped: string[] = [];
   const nmSamples: string[] = [];
   const udSamples: string[] = [];
+  const metaRows: Record<string, unknown>[] = [];
+  const reqRows: Record<string, unknown>[] = [];
+  const writtenIds: string[] = [];
   for (const course of courses) {
     let info = course.pk ? catalog.get(course.pk) ?? null : null;
     let tier: Tier = info ? "pk" : "none";
@@ -458,33 +516,63 @@ async function main() {
         tier = "name";
       }
     }
-    // Fresh grade buckets from this run, else preserve the existing ones (so a
-    // skipped/failed grade crawl never wipes them).
+    // Fresh grade buckets from this run, else preserve existing ones.
     const fresh = course.pk ? gradesByPk.get(course.pk) : undefined;
     const deptGrades = fresh && fresh.size ? [...fresh] : existingGrades.get(course.id) ?? [];
-    try {
-      const outcome = await persist(
-        supabase, course.id, course.course_name, info, tier, deptGrades,
-        existingConf.get(course.id) ?? null
-      );
-      counts[outcome]++;
-      if (outcome === "name" && nmSamples.length < 12) nmSamples.push(`${course.course_name} ← ${info?.name}`);
-      if (outcome === "none" && udSamples.length < 12) udSamples.push(`${course.course_name}`);
-    } catch (err) {
-      skipped.push((err as Error).message);
+    const r = classify(
+      course.id, course.course_name, info, tier, deptGrades,
+      existingSource.get(course.id) ?? null
+    );
+    counts[r.outcome]++;
+    if (r.metaRow) {
+      metaRows.push(r.metaRow);
+      writtenIds.push(course.id);
+      if (r.reqRows?.length) reqRows.push(...r.reqRows);
     }
+    if (r.outcome === "name" && nmSamples.length < 12) nmSamples.push(`${course.course_name} <- ${info?.name}`);
+    if (r.outcome === "none" && udSamples.length < 12) udSamples.push(`${course.course_name}`);
   }
+
+  // BATCH WRITE — ~30 calls instead of ~11k, so the write phase can't exhaust
+  // the connection. Each batch retries a few times on transient failure.
+  console.log(`[enrich] writing ${metaRows.length} metadata rows + ${reqRows.length} requirements…`);
+  await batched(metaRows, 500, (chunk) =>
+    withRetry(() => supabase.from("course_metadata").upsert(chunk, { onConflict: "course_id" }), "metadata upsert")
+  );
+  // Replace requirements for the courses we wrote: delete then bulk-insert.
+  await batched(writtenIds, 200, (chunk) =>
+    withRetry(() => supabase.from("course_requirements").delete().in("course_id", chunk), "requirements delete")
+  );
+  await batched(reqRows, 500, (chunk) =>
+    withRetry(() => supabase.from("course_requirements").insert(chunk), "requirements insert")
+  );
+
   console.log(
-    `[enrich] done. 確定[pk=${counts.pk} override=${counts.override}] ` +
-    `不確定[nameMatch=${counts.name} 通識/未確定=${counts.none}] ` +
-    `protected(未降級)=${counts.protected} skipped=${skipped.length}`
+    `[enrich] done. 確定[pk=${counts.pk} override=${counts.override} nameMatch=${counts.name}] ` +
+    `不確定[未分類=${counts.none}] protected(未降級)=${counts.protected}`
   );
   console.log("[enrich] name-match samples:\n  " + nmSamples.join("\n  "));
-  console.log("[enrich] 未確定 samples:\n  " + udSamples.join("\n  "));
-  if (skipped.length) console.log("[enrich] first skips:", skipped.slice(0, 3));
+  console.log("[enrich] 未分類 samples:\n  " + udSamples.join("\n  "));
 }
 
+function logFatal(tag: string, err: unknown) {
+  // Write synchronously so the reason survives a buffered-stdout exit.
+  const e = err as { stack?: string };
+  try {
+    writeSync(2, `[enrich] ${tag}: ${e?.stack ?? String(err)}\n`);
+  } catch {
+    /* ignore */
+  }
+}
+process.on("unhandledRejection", (err) => {
+  logFatal("UNHANDLED_REJECTION", err);
+  process.exitCode = 1;
+});
+process.on("uncaughtException", (err) => {
+  logFatal("UNCAUGHT_EXCEPTION", err);
+  process.exitCode = 1;
+});
 main().catch((err) => {
-  console.error("[enrich] failed:", err);
-  process.exit(1);
+  logFatal("FAILED", err);
+  process.exitCode = 1;
 });

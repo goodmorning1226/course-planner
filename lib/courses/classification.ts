@@ -22,6 +22,8 @@ export const COURSE_CATEGORIES: { slug: string; label: string }[] = [
   { slug: "expertise", label: "領域專長" },
   { slug: "interschool", label: "校際" },
   { slug: "english", label: "進階英語" },
+  // 未分類: courses we can't confirm a category for (and aren't a known rename).
+  { slug: "uncategorized", label: "未分類" },
 ];
 
 export const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(

@@ -21,7 +21,7 @@ const cursorSchema = z
 // Course網 category slugs (the 課程大類 filter is now multi-category).
 const CATEGORY_SLUGS = [
   "dept", "general", "common", "pearmy", "program",
-  "expertise", "interschool", "english",
+  "expertise", "interschool", "english", "uncategorized",
 ] as const;
 const REQUIREMENT_VALUES = [
   "required", "elective", "required_elective", "optional_required",
@@ -53,10 +53,10 @@ export const courseSearchQuerySchema = z.object({
   // 系所年級 bucket: single "<deptCode>:<gradeId>" token.
   deptGrade: z.string().regex(/^[0-9A-Za-z]{3,5}:.{1,3}$/, "deptGrade 不合法").optional(),
   isGeneralEducation: z.enum(["true", "false"]).optional(),
-  // 通識領域: one or many of A1–A8 (OR), plus the 未確定 bucket.
+  // 通識領域: one or many of A1–A8 (OR).
   geCategory: z
     .string()
-    .regex(/^(A[1-8]|未確定)(,(A[1-8]|未確定))*$/, "geCategory 不合法")
+    .regex(/^A[1-8](,A[1-8])*$/, "geCategory 不合法")
     .optional(),
   targetDepartment: z.string().trim().max(100).optional(),
   requirement: z.enum(REQUIREMENT_VALUES).optional(),
