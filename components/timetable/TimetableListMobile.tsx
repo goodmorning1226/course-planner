@@ -3,25 +3,26 @@
 import type { CourseWithSessions, Weekday } from "@/lib/courses/types";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { getConflictsBySlot, cellKey } from "@/lib/courses/conflicts";
 import { formatPeriods } from "@/lib/courses/periods";
 import { weekdayLabel } from "@/lib/utils";
-import { ConflictBadge } from "./ConflictBadge";
 
 // Mobile list-based timetable. Groups course sessions by weekday:
-//   3-4節｜課名｜教室｜教師 (｜⚠ 衝堂)
-// A row is flagged when that specific session's slot conflicts with another.
+//   3-4節｜課名｜教室｜教師
+// Courses sharing a slot are just listed normally (no conflict highlight).
 
-const DAYS: Weekday[] = [1, 2, 3, 4, 5, 6, 7];
+const WEEKDAYS: Weekday[] = [1, 2, 3, 4, 5];
+const ALL_DAYS: Weekday[] = [1, 2, 3, 4, 5, 6, 7];
 
 export function TimetableListMobile({
   courses,
   onRemove,
+  showWeekend = false,
 }: {
   courses: CourseWithSessions[];
   onRemove: (courseId: string) => void;
+  showWeekend?: boolean;
 }) {
-  const conflictSlots = getConflictsBySlot(courses);
+  const DAYS = showWeekend ? ALL_DAYS : WEEKDAYS;
 
   return (
     <div className="space-y-5">
@@ -46,9 +47,6 @@ export function TimetableListMobile({
               {weekdayLabel(day)}
             </h2>
             {rows.map(({ course, session }) => {
-              const conflicted = session.periods.some((p) =>
-                conflictSlots.has(cellKey(day, p))
-              );
               return (
                 <Card key={session.id} className="p-3">
                   <div className="flex items-start justify-between gap-3">
@@ -58,7 +56,6 @@ export function TimetableListMobile({
                           {formatPeriods(session.periods) || "—"} 節
                         </span>
                         <span className="font-medium">{course.course_name}</span>
-                        {conflicted && <ConflictBadge count={2} showCount={false} />}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {[session.classroom, course.teacher, course.pk && `流水號 ${course.pk}`]

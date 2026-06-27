@@ -19,7 +19,7 @@ export interface SearchFilters {
   depts?: string[]; // 系所大類: one or many dept codes
   deptGrade?: string; // "<deptCode>:<gradeId>" — only when a single dept is picked
   isGeneralEducation?: "true" | "false";
-  geCategory?: string;
+  geCategory?: string[]; // 通識領域 A1–A8: one or many (OR)
 }
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7];

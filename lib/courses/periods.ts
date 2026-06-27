@@ -100,6 +100,15 @@ export function isValidPeriod(code: string): code is PeriodCode {
   return CODE_INDEX.has(code);
 }
 
+const TIME_BY_CODE = new Map(NTU_PERIODS.map((p) => [p.code, p]));
+
+/** Start/end time for a period code, or null if unknown. */
+export function getPeriodTime(
+  code: PeriodCode
+): { start: string; end: string } | null {
+  return TIME_BY_CODE.get(code) ?? null;
+}
+
 /** Human-readable label for a period, e.g. "3（10:20–11:10）". */
 export function getPeriodLabel(code: PeriodCode): string {
   const p = NTU_PERIODS.find((x) => x.code === code);

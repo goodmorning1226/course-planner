@@ -1,54 +1,56 @@
 "use client";
 
 import { useState } from "react";
-import type { CourseWithSessions, PeriodCode, Weekday } from "@/lib/courses/types";
-import { PERIOD_CODES } from "@/lib/courses/periods";
+import type { CourseWithSessions, Weekday } from "@/lib/courses/types";
+import { PERIOD_CODES, getPeriodTime } from "@/lib/courses/periods";
 import { buildSlotIndex, cellKey } from "@/lib/courses/conflicts";
 import { formatPeriods } from "@/lib/courses/periods";
 import { weekdayLabel } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { ConflictBadge } from "./ConflictBadge";
 
 // Desktop weekly grid: columns = Mon–Sun, rows = periods 0–10, A–D.
-// A course occupies every (weekday, period) cell it meets in. Clicking an
-// occupied cell opens a detail panel below the grid (stable & clear, rather
-// than a floating popover); conflict cells (>1 course) show a ConflictBadge.
+// A course occupies every (weekday, period) cell it meets in. Courses sharing a
+// slot are simply shown as separate boxes (no conflict highlight). Clicking a
+// course selects THAT course — all of its cells are highlighted and a detail
+// panel below shows only that course's info.
 
-const DAYS: Weekday[] = [1, 2, 3, 4, 5, 6, 7];
-
-interface SelectedCell {
-  day: Weekday;
-  period: PeriodCode;
-}
+const WEEKDAYS: Weekday[] = [1, 2, 3, 4, 5];
+const ALL_DAYS: Weekday[] = [1, 2, 3, 4, 5, 6, 7];
 
 export function TimetableGrid({
   courses,
   onRemove,
+  showWeekend = false,
 }: {
   courses: CourseWithSessions[];
   onRemove: (courseId: string) => void;
+  showWeekend?: boolean;
 }) {
   const slots = buildSlotIndex(courses);
-  const [selected, setSelected] = useState<SelectedCell | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Hovering any cell of a course highlights ALL of its cells (CSS :hover only
+  // covers the single hovered cell, so we track it ourselves).
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const DAYS = showWeekend ? ALL_DAYS : WEEKDAYS;
 
-  const selectedCourses = selected
-    ? slots.get(cellKey(selected.day, selected.period)) ?? []
-    : [];
+  const selectedCourse = selectedId
+    ? courses.find((c) => c.id === selectedId) ?? null
+    : null;
 
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full min-w-[640px] border-collapse text-xs">
+        <table className="w-full min-w-[640px] table-fixed border-collapse text-xs">
           <thead>
             <tr className="bg-muted/40">
-              <th className="w-10 border-b border-border p-2 font-medium text-muted-foreground">
+              <th className="w-16 border-b border-border p-2 font-bold text-muted-foreground">
                 節次
               </th>
               {DAYS.map((d) => (
                 <th
                   key={d}
-                  className="border-b border-l border-border p-2 font-medium text-muted-foreground"
+                  className="border-b border-l border-border p-2 font-bold text-muted-foreground"
                 >
                   {weekdayLabel(d)}
                 </th>
@@ -58,44 +60,54 @@ export function TimetableGrid({
           <tbody>
             {PERIOD_CODES.map((period) => (
               <tr key={period}>
-                <td className="border-b border-border p-1 text-center font-medium text-muted-foreground">
-                  {period}
+                <td className="border-b border-border p-1 text-center text-muted-foreground">
+                  <div className="font-bold">{period}</div>
+                  {(() => {
+                    const t = getPeriodTime(period);
+                    return t ? (
+                      <div className="text-[9px] leading-tight tabular-nums">
+                        {t.start}
+                        <br />
+                        {t.end}
+                      </div>
+                    ) : null;
+                  })()}
                 </td>
                 {DAYS.map((day) => {
                   const cell = slots.get(cellKey(day, period)) ?? [];
-                  const isConflict = cell.length > 1;
-                  const isSelected =
-                    selected?.day === day && selected?.period === period;
                   return (
                     <td
                       key={day}
                       className="border-b border-l border-border p-1 align-top"
                     >
                       {cell.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setSelected({ day, period })}
-                          title={cell.map((c) => c.course_name).join("、")}
-                          className={cn(
-                            "flex w-full flex-col gap-0.5 rounded-sm p-1 text-left transition-colors",
-                            isConflict
-                              ? "bg-[hsl(var(--warning))]/10 ring-1 ring-[hsl(var(--warning))]/40"
-                              : "bg-muted hover:bg-muted/70",
-                            isSelected && "ring-2 ring-foreground/40"
-                          )}
-                        >
-                          {isConflict && <ConflictBadge count={cell.length} />}
-                          {cell.slice(0, 2).map((c) => (
-                            <span key={c.id} className="truncate text-[11px]">
-                              {c.course_name}
-                            </span>
+                        <div className="flex flex-col gap-1">
+                          {cell.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() =>
+                                setSelectedId((prev) =>
+                                  prev === c.id ? null : c.id
+                                )
+                              }
+                              onMouseEnter={() => setHoveredId(c.id)}
+                              onMouseLeave={() => setHoveredId(null)}
+                              title={c.course_name}
+                              className={cn(
+                                "w-full rounded-sm p-1 text-left transition-colors",
+                                c.id === hoveredId
+                                  ? "bg-foreground/20 text-foreground"
+                                  : "bg-muted",
+                                c.id === selectedId && "ring-2 ring-foreground/40"
+                              )}
+                            >
+                              <span className="block truncate font-sans text-[11px]">
+                                {c.course_name}
+                              </span>
+                            </button>
                           ))}
-                          {cell.length > 2 && (
-                            <span className="text-[10px] text-muted-foreground">
-                              +{cell.length - 2}
-                            </span>
-                          )}
-                        </button>
+                        </div>
                       )}
                     </td>
                   );
@@ -106,70 +118,60 @@ export function TimetableGrid({
         </table>
       </div>
 
-      {/* Expanded detail for the clicked cell. */}
-      {selected && selectedCourses.length > 0 && (
+      {/* Detail for the clicked course (only that course, all its sessions). */}
+      {selectedCourse && (
         <div className="rounded-lg border border-border p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-sm font-semibold">
-              {weekdayLabel(selected.day)}・第 {selected.period} 節
-              {selectedCourses.length > 1 && (
-                <ConflictBadge count={selectedCourses.length} className="ml-2" />
-              )}
-            </p>
-            <button
-              type="button"
-              onClick={() => setSelected(null)}
-              className="text-xs text-muted-foreground hover:text-foreground"
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              {/* 標題行：課名 + 流水號（班次）。 */}
+              <p className="text-sm font-bold">
+                {selectedCourse.course_name}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {[
+                    selectedCourse.pk && `流水號 ${selectedCourse.pk}`,
+                    selectedCourse.class_group &&
+                      `班次 ${selectedCourse.class_group}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                </span>
+              </p>
+              {/* 次行：教師・教室・星期 節次。 */}
+              <p className="text-xs text-muted-foreground">
+                {[
+                  selectedCourse.teacher,
+                  Array.from(
+                    new Set(
+                      selectedCourse.sessions
+                        .map((s) => s.classroom)
+                        .filter(Boolean)
+                    )
+                  ).join("、") || null,
+                  ...selectedCourse.sessions.map(
+                    (s) =>
+                      `${weekdayLabel(s.weekday)} ${
+                        formatPeriods(s.periods) || "—"
+                      } 節`
+                  ),
+                ]
+                  .filter(Boolean)
+                  .join("・")}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => {
+                onRemove(selectedCourse.id);
+                setSelectedId(null);
+              }}
             >
-              關閉
-            </button>
+              移除
+            </Button>
           </div>
-          <ul className="space-y-3">
-            {selectedCourses.map((c) => (
-              <SlotCourse
-                key={c.id}
-                course={c}
-                day={selected.day}
-                onRemove={onRemove}
-              />
-            ))}
-          </ul>
         </div>
       )}
     </div>
-  );
-}
-
-function SlotCourse({
-  course,
-  day,
-  onRemove,
-}: {
-  course: CourseWithSessions;
-  day: Weekday;
-  onRemove: (courseId: string) => void;
-}) {
-  // Show the session(s) that meet on this weekday.
-  const daySessions = course.sessions.filter((s) => s.weekday === day);
-  return (
-    <li className="flex items-start justify-between gap-3 border-b border-border pb-3 last:border-0 last:pb-0">
-      <div className="min-w-0 space-y-1">
-        <p className="text-sm font-medium">{course.course_name}</p>
-        <p className="text-xs text-muted-foreground">
-          {[course.pk && `流水號 ${course.pk}`, course.class_group && `班次 ${course.class_group}`, course.teacher, course.building_or_college]
-            .filter(Boolean)
-            .join("・")}
-        </p>
-        {daySessions.map((s) => (
-          <p key={s.id} className="text-xs text-muted-foreground">
-            {s.raw_time_text || "—"}・節次 {formatPeriods(s.periods) || "—"}・
-            {s.classroom || "—"}
-          </p>
-        ))}
-      </div>
-      <Button size="sm" variant="outline" onClick={() => onRemove(course.id)}>
-        移除
-      </Button>
-    </li>
   );
 }

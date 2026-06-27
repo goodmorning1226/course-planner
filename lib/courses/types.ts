@@ -77,6 +77,8 @@ export interface CourseSession {
 /** A course together with all of its sessions — the shape used by the UI. */
 export interface CourseWithSessions extends Course {
   sessions: CourseSession[];
+  /** 學分 — denormalised from course_metadata for convenient totals. */
+  credits?: number | null;
 }
 
 // --- Classification / metadata enrichment -----------------------------------

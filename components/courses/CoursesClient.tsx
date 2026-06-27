@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { useState } from "react";
 import { CourseSearchBar } from "@/components/courses/CourseSearchBar";
 import {
   CourseFilters,
@@ -15,51 +14,18 @@ import { cn } from "@/lib/utils";
 
 // Interactive body of the search page. Auth state arrives from the server
 // component so we know up front whether to use localStorage or the cloud.
-// Navbar height (h-14 = 56px); the search header pins directly below it.
-const NAV_H = 56;
-
 export function CoursesClient({ userEmail }: { userEmail: string | null }) {
   const [q, setQ] = useState("");
   const [filters, setFilters] = useState<SearchFilters>({});
   const selection = useTimetableSelection(userEmail);
 
-  // The sticky search header grows when a category sub-row (系所/通識) opens, so
-  // we measure it and pin the filter column exactly below it (no magic offset).
-  const headerRef = useRef<HTMLDivElement | null>(null);
-  const [headerH, setHeaderH] = useState(0);
-  useEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setHeaderH(el.offsetHeight));
-    ro.observe(el);
-    setHeaderH(el.offsetHeight);
-    return () => ro.disconnect();
-  }, []);
-
   return (
-    // -mt-6 cancels <main>'s top padding so the sticky header's natural position
-    // is already flush under the navbar — it pins with ZERO travel instead of
-    // sliding up as you scroll. The navbar↔title gap is recreated INSIDE the
-    // header (pt-8) so it stays put and never scrolls away.
-    <div className="-mt-6 space-y-4">
-      {/* Pinned below the navbar (h-14): title + 我的課表 link + search bar stay
-          put while the course list scrolls underneath. -mx-4 makes the solid
-          background span the full content width so cards don't show through. */}
-      <div
-        ref={headerRef}
-        className="sticky top-14 z-20 -mx-4 space-y-3 border-b border-border bg-background px-4 pb-3 pt-8"
-      >
-        <div className="flex items-center justify-between gap-2">
+    <div className="space-y-4">
+      {/* Search header — scrolls with the page (no longer pinned). */}
+      <div className="space-y-3 border-b border-border pb-3">
+        <header className="text-center">
           <h1 className="text-xl font-semibold">課程搜尋</h1>
-          {selection.ready && selection.count > 0 && (
-            <Link
-              href="/timetable"
-              className="shrink-0 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              我的課表（{selection.count}）
-            </Link>
-          )}
-        </div>
+        </header>
         <CourseSearchBar onSearch={setQ} />
 
         {/* 課程大類 — single-select row directly under the search bar.
@@ -123,16 +89,20 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
         {filters.courseType === "general" && (
           <div className="flex gap-1 overflow-x-auto pb-0.5">
             {Object.keys(GE_AREA_LABELS).map((area) => {
-              const active = filters.geCategory === area;
+              const active = !!filters.geCategory?.includes(area);
               return (
                 <button
                   key={area}
                   type="button"
                   onClick={() =>
                     setFilters((f) => {
+                      const cur = f.geCategory ?? [];
+                      const list = cur.includes(area)
+                        ? cur.filter((a) => a !== area)
+                        : [...cur, area];
                       const next = { ...f };
-                      if (f.geCategory === area) delete next.geCategory;
-                      else next.geCategory = area;
+                      if (list.length) next.geCategory = list;
+                      else delete next.geCategory;
                       return next;
                     })
                   }
@@ -183,13 +153,7 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
       )}
 
       <div className="grid gap-6 md:grid-cols-[220px_1fr]">
-        <aside
-          className="md:sticky md:self-start"
-          // Pin at exactly the filter's resting position — navbar + header +
-          // the space-y-4 gap (16px) above the grid — so it sticks with ZERO
-          // travel, matching the search header (no slide before it sticks).
-          style={{ top: NAV_H + headerH + 16 }}
-        >
+        <aside>
           <CourseFilters value={filters} onChange={setFilters} />
         </aside>
         <section>

@@ -26,7 +26,7 @@ function buildUrl(q: string, filters: SearchFilters, cursor: string | null) {
   if (filters.depts?.length) p.set("dept", filters.depts.join(","));
   if (filters.deptGrade) p.set("deptGrade", filters.deptGrade);
   if (filters.isGeneralEducation) p.set("isGeneralEducation", filters.isGeneralEducation);
-  if (filters.geCategory) p.set("geCategory", filters.geCategory);
+  if (filters.geCategory?.length) p.set("geCategory", filters.geCategory.join(","));
   if (cursor) p.set("cursor", cursor);
   p.set("limit", "30");
   return `/api/courses?${p.toString()}`;

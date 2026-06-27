@@ -43,19 +43,27 @@ export async function getTimetableCourses(
 ): Promise<CourseWithSessions[]> {
   const { data, error } = await supabase
     .from("timetable_courses")
-    .select("course_id, courses(*, course_sessions(*))")
+    .select("course_id, courses(*, course_sessions(*), course_metadata(credits))")
     .eq("timetable_id", timetableId);
   if (error) throw error;
 
   const courses: CourseWithSessions[] = [];
   for (const row of data ?? []) {
-    // `courses` is a to-one embed; `course_sessions` a to-many embed.
+    // `courses` is a to-one embed; `course_sessions`/`course_metadata` to-many.
     const c = row.courses as unknown as
-      | (CourseWithSessions & { course_sessions?: CourseWithSessions["sessions"] })
+      | (CourseWithSessions & {
+          course_sessions?: CourseWithSessions["sessions"];
+          course_metadata?: { credits: number | null }[] | { credits: number | null } | null;
+        })
       | null;
     if (!c) continue;
-    const { course_sessions, ...course } = c;
-    courses.push({ ...(course as CourseWithSessions), sessions: course_sessions ?? [] });
+    const { course_sessions, course_metadata, ...course } = c;
+    const meta = Array.isArray(course_metadata) ? course_metadata[0] : course_metadata;
+    courses.push({
+      ...(course as CourseWithSessions),
+      sessions: course_sessions ?? [],
+      credits: meta?.credits ?? null,
+    });
   }
   return courses;
 }
