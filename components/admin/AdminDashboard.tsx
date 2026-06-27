@@ -7,12 +7,12 @@ import { Button } from "@/components/ui/button";
 
 interface Stats {
   courses: number;
-  sessions: number;
   classified: number;
   generalEducation: number;
   timetableEntries: number;
   pageViews: number;
   users: number;
+  usersWithCourses: number;
   lastScrape: { status: string; finished_at: string | null; course_count: number } | null;
 }
 interface BuildingProgress {
@@ -104,7 +104,6 @@ export function AdminDashboard() {
       {/* Metric cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Metric label="課程數" value={stats?.courses} />
-        <Metric label="上課時段" value={stats?.sessions} />
         <Metric label="已分類" value={stats?.classified} />
         <Metric label="通識課" value={stats?.generalEducation} />
         <Metric label="使用者" value={stats?.users} />
@@ -114,6 +113,8 @@ export function AdminDashboard() {
           label="最後爬取"
           value={stats?.lastScrape ? `${stats.lastScrape.course_count} 門` : "—"}
         />
+        <Metric label="已排課人數" value={stats?.usersWithCourses} />
+
       </div>
 
       {/* Quick links */}

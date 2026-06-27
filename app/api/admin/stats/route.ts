@@ -11,10 +11,12 @@ export async function GET() {
     const db = createServiceRoleClient();
     const head = { count: "exact" as const, head: true };
 
-    const [courses, sessions, classified, ge, timetables, pv, lastRun, users] =
+    const [courses, tcRows, classified, ge, timetables, pv, lastRun, users] =
       await Promise.all([
         db.from("courses").select("*", head),
-        db.from("course_sessions").select("*", head),
+        // All timetable memberships → distinct timetable_id = number of users
+        // who have at least one course in their timetable.
+        db.from("timetable_courses").select("timetable_id"),
         db.from("course_metadata").select("*", head),
         db.from("course_metadata").select("*", head).eq("is_general_education", true),
         db.from("timetable_courses").select("*", head),
@@ -23,14 +25,18 @@ export async function GET() {
         db.auth.admin.listUsers({ page: 1, perPage: 1000 }),
       ]);
 
+    const usersWithCourses = new Set(
+      (tcRows.data ?? []).map((r) => (r as { timetable_id: string }).timetable_id)
+    ).size;
+
     return NextResponse.json({
       courses: courses.count ?? 0,
-      sessions: sessions.count ?? 0,
       classified: classified.count ?? 0,
       generalEducation: ge.count ?? 0,
       timetableEntries: timetables.count ?? 0,
       pageViews: Number(pv.data?.count ?? 0),
       users: users.data?.users?.length ?? 0,
+      usersWithCourses,
       lastScrape: lastRun.data ?? null,
     });
   } catch (err) {
