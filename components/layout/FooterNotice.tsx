@@ -27,9 +27,7 @@ export async function FooterNotice() {
     <footer className="border-t border-border bg-muted/40">
       <div className="mx-auto w-full max-w-5xl px-4 py-4 text-center text-xs leading-relaxed text-muted-foreground">
         <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-          <span>非官方暫定資料</span>
-          <span aria-hidden>｜</span>
-          <span>正式資訊以臺大課程網為準</span>
+          <span>非台大官方網站，正式資訊以臺大課程網為準</span>
           <span aria-hidden>｜</span>
           <span>
             最後更新：

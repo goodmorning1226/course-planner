@@ -41,7 +41,9 @@ export function CourseSearchBar({
         aria-label="搜尋課程"
         autoComplete="off"
       />
-      <Button type="submit">搜尋</Button>
+      <Button type="submit" className="shrink-0 whitespace-nowrap">
+        搜尋
+      </Button>
     </form>
   );
 }

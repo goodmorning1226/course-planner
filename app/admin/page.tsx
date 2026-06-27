@@ -3,7 +3,6 @@ import { getAdminUser } from "@/lib/admin-server";
 import { AdminDashboard } from "@/components/admin/AdminDashboard";
 
 export const metadata = {
-  title: "管理後台｜暫排課（非官方）",
   robots: { index: false, follow: false },
 };
 

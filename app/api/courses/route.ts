@@ -89,6 +89,10 @@ export async function GET(req: Request) {
   const buildings = buildingOrCollege
     ? buildingOrCollege.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
+  // 通識領域 A1–A8: one or many areas (OR within the group).
+  const geCategories = geCategory
+    ? geCategory.split(",").map((s) => s.trim()).filter(Boolean)
+    : undefined;
 
   let offset = 0;
   if (cursor) {
@@ -149,7 +153,8 @@ export async function GET(req: Request) {
     if (deptGrade) cq = cq.contains("course_metadata.dept_grades", [deptGrade]);
     if (isGeneralEducation)
       cq = cq.eq("course_metadata.is_general_education", isGeneralEducation === "true");
-    if (geCategory) cq = cq.contains("course_metadata.ge_categories", [geCategory]);
+    if (geCategories?.length)
+      cq = cq.overlaps("course_metadata.ge_categories", geCategories);
     if (classificationSource) cq = cq.eq("course_metadata.source", classificationSource);
     if (classificationConfidence)
       cq = cq.eq("course_metadata.confidence", classificationConfidence);

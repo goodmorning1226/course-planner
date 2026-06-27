@@ -8,7 +8,8 @@ import { TimetableListMobile } from "./TimetableListMobile";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useSelectedCourses } from "@/lib/timetable/useSelectedCourses";
-import { findConflictingCourseIds } from "@/lib/courses/conflicts";
+import { maxSelectableCredits } from "@/lib/courses/conflicts";
+import { cn } from "@/lib/utils";
 
 // Renders the user's timetable. Logged-out: courses come from localStorage.
 // Logged-in: courses come from the cloud (GET /api/timetable); if localStorage
@@ -21,6 +22,10 @@ export function TimetableView({ userEmail }: { userEmail: string | null }) {
   const [cloudStatus, setCloudStatus] = useState<"loading" | "ready" | "error">(
     loggedIn ? "loading" : "ready"
   );
+
+  // Weekend (Sat/Sun) columns are shown by default; the top-right「隱藏週末」
+  // switch lets the user collapse them.
+  const [showWeekend, setShowWeekend] = useState(true);
 
   const [mergeDismissed, setMergeDismissed] = useState(false);
   const [mergeStatus, setMergeStatus] = useState<"idle" | "merging" | "error">(
@@ -47,7 +52,9 @@ export function TimetableView({ userEmail }: { userEmail: string | null }) {
   }, [loggedIn, fetchCloud]);
 
   const courses = loggedIn ? cloud : local.courses;
-  const conflictCount = findConflictingCourseIds(courses).size;
+  // "最多可選學分": conflicting courses can't both be taken, so this is the
+  // max-weight independent set over the conflict graph (weight = credits).
+  const totalCredits = maxSelectableCredits(courses);
 
   // Remove: cloud (DELETE) or local depending on auth.
   const removeCloud = useCallback(
@@ -67,6 +74,30 @@ export function TimetableView({ userEmail }: { userEmail: string | null }) {
     [fetchCloud]
   );
   const remove = loggedIn ? removeCloud : local.remove;
+
+  // Clear the whole timetable. Cloud: delete every course (optimistic, revert on
+  // failure); local: just clear the store.
+  const clearAll = useCallback(async () => {
+    if (!window.confirm("確定要清除整個課表嗎？此動作無法復原。")) return;
+    if (!loggedIn) {
+      local.clear();
+      return;
+    }
+    const ids = cloud.map((c) => c.id);
+    setCloud([]); // optimistic
+    try {
+      for (const courseId of ids) {
+        const res = await fetch("/api/timetable/courses", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ courseId }),
+        });
+        if (!res.ok) throw new Error();
+      }
+    } catch {
+      fetchCloud(); // revert to server truth
+    }
+  }, [loggedIn, local, cloud, fetchCloud]);
 
   const showMerge =
     loggedIn && local.ready && local.courses.length > 0 && !mergeDismissed;
@@ -147,19 +178,56 @@ export function TimetableView({ userEmail }: { userEmail: string | null }) {
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-            <span>已加入 {courses.length} 門課</span>
-            {conflictCount > 0 && (
-              <span className="text-[hsl(var(--warning))]">
-                ⚠ {conflictCount} 門課有衝堂
-              </span>
-            )}
+            <span>已加入 {courses.length} 門課・最多 {totalCredits} 學分</span>
+
+            {(() => {
+              const hidden = !showWeekend; // switch is ON when weekends are hidden
+              return (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={hidden}
+                  onClick={() => setShowWeekend((v) => !v)}
+                  className="ml-auto inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <span>隱藏週末</span>
+                  <span
+                    className={cn(
+                      "relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors",
+                      hidden ? "bg-foreground" : "bg-border"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute left-0.5 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-background shadow-sm transition-transform",
+                        hidden ? "translate-x-4" : "translate-x-0"
+                      )}
+                    />
+                  </span>
+                </button>
+              );
+            })()}
           </div>
 
           <div className="hidden md:block">
-            <TimetableGrid courses={courses} onRemove={remove} />
+            <TimetableGrid
+              courses={courses}
+              onRemove={remove}
+              showWeekend={showWeekend}
+            />
           </div>
           <div className="md:hidden">
-            <TimetableListMobile courses={courses} onRemove={remove} />
+            <TimetableListMobile
+              courses={courses}
+              onRemove={remove}
+              showWeekend={showWeekend}
+            />
+          </div>
+
+          <div className="flex justify-center pt-2">
+            <Button size="sm" variant="outline" onClick={clearAll}>
+              清除課表
+            </Button>
           </div>
         </>
       )}
@@ -173,7 +241,7 @@ function EmptyState() {
       <p className="text-sm text-muted-foreground">
         尚未加入任何課程，請先到課程搜尋加入暫排課表。
       </p>
-      <Link href="/courses">
+      <Link href="/">
         <Button>前往課程搜尋</Button>
       </Link>
     </div>
