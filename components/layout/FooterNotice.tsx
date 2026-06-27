@@ -26,15 +26,16 @@ export async function FooterNotice() {
   return (
     <footer className="border-t border-border bg-muted/40">
       <div className="mx-auto w-full max-w-5xl px-4 py-4 text-center text-xs leading-relaxed text-muted-foreground">
-        <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+        {/* Stacked on mobile (no separator); inline with ｜ on sm+. */}
+        <p className="flex flex-col items-center gap-y-0.5 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-x-2 sm:gap-y-1">
           <span>非台大官方網站，正式資訊以臺大課程網為準</span>
-          <span aria-hidden>｜</span>
+          <span aria-hidden className="hidden sm:inline">｜</span>
           <span>
             最後更新：
             {lastUpdatedAt ? formatUpdatedAt(lastUpdatedAt) : "尚未取得"}
           </span>
         </p>
-        <p className="mt-1">
+        <p className="mt-2 sm:mt-1">
           本站與臺灣大學教務處、課程網無隸屬關係，資料整理自公開可查詢之教室課表，僅供參考。
         </p>
       </div>
