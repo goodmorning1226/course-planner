@@ -28,9 +28,7 @@ export function CourseClassification({
         ))}
         {metadata.is_general_education &&
           metadata.ge_categories.map((c) => (
-            <Badge key={c}>
-              {c} {GE_AREA_LABELS[c] ?? ""}
-            </Badge>
+            <Badge key={c}>{GE_AREA_LABELS[c] ? `${c} ${GE_AREA_LABELS[c]}` : c}</Badge>
           ))}
         {metadata.credits != null && (
           <span className="text-muted-foreground">{metadata.credits} 學分</span>

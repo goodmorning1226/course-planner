@@ -119,10 +119,11 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
           })}
         </div>
 
-        {/* 通識領域 sub-row — only when 通識 is the active 大類. A1–A8 only. */}
+        {/* 通識領域 sub-row — only when 通識 is the active 大類. A1–A8 + 未確定
+            (通識課但找不到歷史資料、無法判定領域者). */}
         {filters.courseType === "general" && (
           <div className="flex gap-1 overflow-x-auto pb-0.5">
-            {Object.keys(GE_AREA_LABELS).map((area) => {
+            {[...Object.keys(GE_AREA_LABELS), "未確定"].map((area) => {
               const active = filters.geCategory === area;
               return (
                 <button
@@ -143,7 +144,7 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
                       : "border-border text-muted-foreground hover:bg-muted",
                   )}
                 >
-                  {area} {GE_AREA_LABELS[area]}
+                  {GE_AREA_LABELS[area] ? `${area} ${GE_AREA_LABELS[area]}` : area}
                 </button>
               );
             })}

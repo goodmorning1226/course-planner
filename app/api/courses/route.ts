@@ -220,7 +220,11 @@ export async function GET(req: Request) {
         sessionsByCourse.set(s.course_id, list);
       }
       for (const m of (metaR.data ?? []) as CourseMetadata[]) {
-        metaByCourse.set(m.course_id, m);
+        // Redact internal certainty signals — users must not see the
+        // classification confidence/source (確定/不確定 is server-side only).
+        const { source: _src, confidence: _conf, ...pub } = m;
+        void _src; void _conf;
+        metaByCourse.set(m.course_id, pub as CourseMetadata);
       }
       for (const r of (reqR.data ?? []) as CourseRequirement[]) {
         const list = reqsByCourse.get(r.course_id) ?? [];

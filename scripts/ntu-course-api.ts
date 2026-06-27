@@ -50,17 +50,21 @@ const CATEGORY_EXTRAS: Record<string, Record<string, unknown>> = {
 
 export interface NtuInfo {
   pk: string;
+  name: string | null; // course name (for cross-semester name matching)
   categories: Set<string>; // slugs
   credits: number | null;
   ge: Set<string>; // A1..A8
   depts: Set<string>; // offering department codes (courseTargets.department.id)
+  slots: Set<string>; // "<weekday>-<interval>" time slots (rename time-match aid)
   requirements: { dept: string; compulsory: boolean | null }[];
 }
 
 interface ApiCourse {
   code: string;
   class: string | null;
+  name?: string;
   credits: number | null;
+  schedules?: { weekday?: number; intervals?: string[] }[];
   courseTargets?: {
     department?: { id?: string; name?: string };
     isCompulsory?: boolean | null;
@@ -155,13 +159,18 @@ export async function fetchNtuCatalog(
           let info = map.get(pk);
           if (!info) {
             info = {
-              pk, categories: new Set(), credits: null,
-              ge: new Set(), depts: new Set(), requirements: [],
+              pk, name: c.name ?? null, categories: new Set(), credits: null,
+              ge: new Set(), depts: new Set(), slots: new Set(), requirements: [],
             };
             map.set(pk, info);
           }
+          if (!info.name && c.name) info.name = c.name;
           info.categories.add(slug);
           if (c.credits != null) info.credits = c.credits;
+          for (const s of c.schedules ?? []) {
+            if (s.weekday == null) continue;
+            for (const iv of s.intervals ?? []) info.slots.add(`${s.weekday}-${iv}`);
+          }
           for (const t of c.courseTargets ?? []) {
             for (const g of t.generalMarks ?? []) if (/^A[1-8]$/.test(g)) info.ge.add(g);
             if (t.department?.id) info.depts.add(t.department.id);

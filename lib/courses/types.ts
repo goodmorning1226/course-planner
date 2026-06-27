@@ -129,8 +129,11 @@ export interface CourseMetadata {
   ge_categories: string[];
   ge_labels: string[];
   ge_creditable: boolean | null;
-  source: string;
-  confidence: Confidence;
+  // Internal classification certainty — NEVER sent to the client. confidence is
+  // the 確定/不確定 tag (medium/high = 確定 found exact data; low = 不確定).
+  // The public /api/courses response redacts these (admin reads the DB direct).
+  source?: string;
+  confidence?: Confidence;
   matched_semester: string | null;
   matched_at: string | null;
   created_at: string;
