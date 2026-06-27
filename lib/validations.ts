@@ -81,6 +81,28 @@ export type TimetableCourseBody = z.infer<typeof timetableCourseBodySchema>;
  * optional; when omitted the scraper uses its env defaults. Auth is via the
  * SCRAPE_ADMIN_SECRET header, not the body.
  */
+/**
+ * Body for POST /api/admin/classify — an admin manually assigns categories to a
+ * course (used to clear 未分類). At least one REAL category (never 未分類).
+ */
+const ASSIGNABLE_SLUGS = CATEGORY_SLUGS.filter((s) => s !== "uncategorized") as Exclude<
+  (typeof CATEGORY_SLUGS)[number],
+  "uncategorized"
+>[];
+export const manualClassifySchema = z.object({
+  courseId: z.string().uuid("無效的課程 id"),
+  categories: z
+    .array(z.enum(ASSIGNABLE_SLUGS as [string, ...string[]]))
+    .min(1, "至少選一個類別")
+    .max(9),
+  geCategories: z
+    .array(z.string().regex(/^A[1-8]$/, "通識領域不合法"))
+    .max(8)
+    .optional()
+    .default([]),
+});
+export type ManualClassify = z.infer<typeof manualClassifySchema>;
+
 export const scrapeRequestSchema = z.object({
   // NTU semester, e.g. "115-1" or "1151".
   semester: z

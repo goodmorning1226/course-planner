@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -114,6 +115,18 @@ export function AdminDashboard() {
           value={stats?.lastScrape ? `${stats.lastScrape.course_count} 門` : "—"}
         />
       </div>
+
+      {/* Quick links */}
+      <Link
+        href="/admin/uncategorized"
+        className="flex items-center justify-between rounded-lg border border-border p-4 transition-colors hover:bg-muted"
+      >
+        <div>
+          <p className="text-sm font-semibold">未分類課程</p>
+          <p className="text-xs text-muted-foreground">搜尋並手動標上類別</p>
+        </div>
+        <span className="text-muted-foreground">→</span>
+      </Link>
 
       {/* One-click scrape */}
       <Card className="space-y-4 p-4">
