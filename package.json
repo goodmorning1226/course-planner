@@ -10,7 +10,11 @@
     "lint": "next lint",
     "scrape": "tsx scripts/scrape-ntu-classrooms.ts",
     "enrich": "tsx scripts/enrich-course-metadata.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "curriculum:coursemap": "node scripts/fetch-coursemap.mjs",
+    "curriculum:undergrad": "node scripts/fetch-required-undergrad.mjs",
+    "curriculum:grad": "node scripts/fetch-required-grad.mjs",
+    "curriculum:apply": "node scripts/apply-curriculum.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
