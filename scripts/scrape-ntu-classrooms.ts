@@ -501,6 +501,11 @@ async function main() {
 
     const buildings = await fetchBuildings(ctx);
     requests++;
+    // Some courses (體育 at 網球場/球場, 新生專題, 外教 等) sit only under the
+    // "全部"(%) bucket — rooms that belong to NO named building — so they were
+    // missed. Append a final "其他" pass that crawls exactly those orphan rooms.
+    buildings.push({ value: "%", label: "其他" });
+    const seenRooms = new Set<string>();
     console.log(
       `[scrape] buildings: ${buildings.length} → ${buildings.map((b) => b.label).join(",")}`
     );
@@ -513,9 +518,18 @@ async function main() {
       try {
         rooms = await fetchRooms(ctx, value); // room API keyed by value
         requests++;
+        // "其他"(%) returns ALL rooms; keep only those not in a named building.
+        if (value === "%") rooms = rooms.filter((r) => !seenRooms.has(r));
+        else for (const r of rooms) seenRooms.add(r);
       } catch (err) {
         skipped.push(`building ${label}: ${(err as Error).message}`);
         console.warn(`[scrape] skip building ${label}: ${(err as Error).message}`);
+        await sleep(REQUEST_DELAY_MS);
+        continue;
+      }
+      // Fast path: only crawl the orphan ("其他") rooms; named buildings just
+      // seed seenRooms (their room lists) so we know what counts as orphan.
+      if (process.env.SCRAPE_ORPHAN_ONLY && value !== "%") {
         await sleep(REQUEST_DELAY_MS);
         continue;
       }
