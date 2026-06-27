@@ -143,7 +143,7 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
                       : "border-border text-muted-foreground hover:bg-muted",
                   )}
                 >
-                  {area}
+                  {area} {GE_AREA_LABELS[area]}
                 </button>
               );
             })}
