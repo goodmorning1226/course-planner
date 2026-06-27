@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
 
 // Main nav links with an active-page highlight. Client component so it can read
 // the current pathname; the rest of the Navbar stays a server component.
@@ -34,16 +35,13 @@ export function ActiveNavLink({
   const pathname = usePathname();
   const active = pathname === href;
 
-  let className: string;
-  if (variant === "primary") {
-    className = active
-      ? "ml-1 rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background"
-      : "ml-1 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-foreground/15 hover:text-foreground";
-  } else {
-    className = active
-      ? "rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background"
-      : "rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-foreground/15 hover:text-foreground";
-  }
+  // Shared shape; primary (註冊) keeps a small left gap from 登入.
+  const base =
+    "whitespace-nowrap rounded-md px-2 py-2 text-sm transition-colors sm:px-3";
+  const tone = active
+    ? "bg-foreground font-medium text-background"
+    : "text-muted-foreground hover:bg-foreground/15 hover:text-foreground";
+  const className = cn(base, tone, variant === "primary" && "ml-0.5 sm:ml-1");
 
   return (
     <Link href={href} aria-current={active ? "page" : undefined} className={className}>

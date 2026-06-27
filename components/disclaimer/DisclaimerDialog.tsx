@@ -37,13 +37,16 @@ export function DisclaimerDialog() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="disclaimer-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      // Outer layer scrolls so a tall dialog stays fully reachable on short
+      // (mobile) viewports — the action button never ends up off-screen.
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/50"
     >
-      <div className="w-full max-w-lg rounded-lg border border-border bg-background p-6 shadow-lg">
-        <h2 id="disclaimer-title" className="text-center text-lg font-semibold">
-          使用前請先閱讀
-        </h2>
-        <div className="mt-4 space-y-3 text-sm leading-relaxed text-muted-foreground">
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="w-full max-w-lg rounded-lg border border-border bg-background p-5 shadow-lg sm:p-6">
+          <h2 id="disclaimer-title" className="text-center text-lg font-semibold">
+            使用前請先閱讀
+          </h2>
+          <div className="mt-4 space-y-3 text-sm leading-relaxed text-muted-foreground">
           <p>
             本網站為非官方的臺大 115-1
             排課工具，並非官方的臺大課程網！
@@ -52,12 +55,13 @@ export function DisclaimerDialog() {
             本站資料由公開的臺大 115-1
             教室課表爬取整理而來，僅供提前安排課程參考。課程、教師、教室、時間等資訊之後仍可能有異動。
           </p>
-          <p>
-            正式課程資訊、選課限制、名額、停開與異動等，請以臺大課程網之後公告為準。請勿將此網站作為正式選課依據。
-          </p>
-        </div>
-        <div className="mt-6 flex justify-center">
-          <Button onClick={acknowledge}>我了解，開始使用</Button>
+            <p>
+              正式課程資訊、選課限制、名額、停開與異動等，請以臺大課程網之後公告為準。請勿將此網站作為正式選課依據。
+            </p>
+          </div>
+          <div className="mt-6 flex justify-center">
+            <Button onClick={acknowledge}>我了解，開始使用</Button>
+          </div>
         </div>
       </div>
     </div>

@@ -13,13 +13,17 @@ export async function Navbar() {
 
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background shadow-sm">
-      <nav className="flex h-14 w-full items-center justify-between px-10">
-        <Link href="/" className="flex items-baseline gap-2">
-          <span className="text-base font-semibold tracking-tight">急急排排</span>
-          <span className="text-xs text-muted-foreground">非官方 · 台大 115-1</span>
+      <nav className="flex h-14 w-full items-center justify-between gap-2 px-4 sm:px-6 lg:px-10">
+        <Link href="/" className="flex shrink-0 items-baseline gap-2">
+          <span className="whitespace-nowrap text-base font-semibold tracking-tight">
+            急急排排
+          </span>
+          <span className="hidden whitespace-nowrap text-xs text-muted-foreground sm:inline">
+            非官方 · 台大 115-1
+          </span>
         </Link>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 sm:gap-1">
           <NavLinks />
 
           {user ? (

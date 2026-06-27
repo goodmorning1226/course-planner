@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { CourseWithSessions } from "@/lib/courses/types";
 import { TimetableGrid } from "./TimetableGrid";
-import { TimetableListMobile } from "./TimetableListMobile";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useSelectedCourses } from "@/lib/timetable/useSelectedCourses";
@@ -209,20 +208,12 @@ export function TimetableView({ userEmail }: { userEmail: string | null }) {
             })()}
           </div>
 
-          <div className="hidden md:block">
-            <TimetableGrid
-              courses={courses}
-              onRemove={remove}
-              showWeekend={showWeekend}
-            />
-          </div>
-          <div className="md:hidden">
-            <TimetableListMobile
-              courses={courses}
-              onRemove={remove}
-              showWeekend={showWeekend}
-            />
-          </div>
+          {/* Always the grid — it scrolls horizontally when space is tight. */}
+          <TimetableGrid
+            courses={courses}
+            onRemove={remove}
+            showWeekend={showWeekend}
+          />
 
           <div className="flex justify-center pt-2">
             <Button size="sm" variant="outline" onClick={clearAll}>
