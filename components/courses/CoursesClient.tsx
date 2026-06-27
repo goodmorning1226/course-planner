@@ -37,13 +37,17 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
   }, []);
 
   return (
-    <div className="space-y-4">
+    // -mt-6 cancels <main>'s top padding so the sticky header's natural position
+    // is already flush under the navbar — it pins with ZERO travel instead of
+    // sliding up as you scroll. The navbar↔title gap is recreated INSIDE the
+    // header (pt-8) so it stays put and never scrolls away.
+    <div className="-mt-6 space-y-4">
       {/* Pinned below the navbar (h-14): title + 我的課表 link + search bar stay
           put while the course list scrolls underneath. -mx-4 makes the solid
           background span the full content width so cards don't show through. */}
       <div
         ref={headerRef}
-        className="sticky top-14 z-20 -mx-4 space-y-3 border-b border-border bg-background px-4 pb-3 pt-2"
+        className="sticky top-14 z-20 -mx-4 space-y-3 border-b border-border bg-background px-4 pb-3 pt-8"
       >
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-xl font-semibold">課程搜尋</h1>
@@ -181,7 +185,10 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
       <div className="grid gap-6 md:grid-cols-[220px_1fr]">
         <aside
           className="md:sticky md:self-start"
-          style={{ top: NAV_H + headerH + 8 }}
+          // Pin at exactly the filter's resting position — navbar + header +
+          // the space-y-4 gap (16px) above the grid — so it sticks with ZERO
+          // travel, matching the search header (no slide before it sticks).
+          style={{ top: NAV_H + headerH + 16 }}
         >
           <CourseFilters value={filters} onChange={setFilters} />
         </aside>
