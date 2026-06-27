@@ -108,13 +108,12 @@ export function AdminDashboard() {
         <Metric label="通識課" value={stats?.generalEducation} />
         <Metric label="使用者" value={stats?.users} />
         <Metric label="瀏覽數" value={stats?.pageViews} />
+        <Metric label="已排課人數" value={stats?.usersWithCourses} />
         <Metric label="課表項目" value={stats?.timetableEntries} />
         <Metric
           label="最後爬取"
           value={stats?.lastScrape ? `${stats.lastScrape.course_count} 門` : "—"}
         />
-        <Metric label="已排課人數" value={stats?.usersWithCourses} />
-
       </div>
 
       {/* Quick links */}
