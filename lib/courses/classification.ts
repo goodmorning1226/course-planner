@@ -30,6 +30,26 @@ export const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
   COURSE_CATEGORIES.map((c) => [c.slug, c.label])
 );
 
+/** Real (assignable) categories — everything except the 未分類 fallback. */
+export const ASSIGNABLE_CATEGORIES = COURSE_CATEGORIES.filter(
+  (c) => c.slug !== "uncategorized"
+);
+
+/** Map a course's category slugs (+ GE count) to a normalized course type. */
+export function deriveCourseType(
+  categories: string[],
+  geSize: number
+): CourseTypeNormalized {
+  if (categories.includes("uncategorized")) return "unknown";
+  if (geSize > 0 || categories.includes("general")) return "general_education";
+  if (categories.includes("common")) return "common_required";
+  if (categories.includes("pearmy")) return "military";
+  if (categories.includes("english")) return "common_required";
+  if (categories.includes("program")) return "university_wide";
+  if (categories.includes("interschool")) return "intercollegiate";
+  return "departmental";
+}
+
 // --- General-education areas (A1–A8) ----------------------------------------
 
 export const GE_AREA_LABELS: Record<string, string> = {
