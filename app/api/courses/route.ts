@@ -135,7 +135,7 @@ export async function GET(req: Request) {
       (hasSessionFilter ? ", course_sessions!inner(course_id)" : "") +
       (hasMetaFilter ? ", course_metadata!inner(course_id)" : "") +
       (hasReqFilter ? ", course_requirements!inner(course_id)" : "");
-    let cq = supabase.from("courses").select(selectStr);
+    let cq = supabase.from("courses").select(selectStr, { count: "exact" });
 
     // (1) Session-level filters via embedded inner join (EXISTS semantics).
     // A matching session must be on one of the selected weekdays AND have at
@@ -190,7 +190,7 @@ export async function GET(req: Request) {
       .order("id", { ascending: true })
       .range(offset, offset + limit);
 
-    const { data: rawRows, error } = await cq;
+    const { data: rawRows, error, count: total } = await cq;
     if (error) throw error;
 
     const rows = (rawRows ?? []) as unknown as (Course & {
@@ -268,7 +268,7 @@ export async function GET(req: Request) {
     }
 
     return NextResponse.json(
-      { data, nextCursor },
+      { data, nextCursor, total: total ?? null },
       {
         // Course data is public + low-churn (scraped a couple times a day):
         // let the CDN cache popular identical queries to ease DB load.

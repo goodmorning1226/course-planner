@@ -15,6 +15,7 @@ type Status = "loading" | "loadingMore" | "ready" | "error";
 interface ApiResponse {
   data: CourseWithSessionsAndMetadata[];
   nextCursor: string | null;
+  total: number | null;
 }
 
 function buildUrl(q: string, filters: SearchFilters, cursor: string | null) {
@@ -37,11 +38,13 @@ export function CourseList({
   filters,
   isSelected,
   onToggle,
+  onTotal,
 }: {
   q: string;
   filters: SearchFilters;
   isSelected: (id: string) => boolean;
   onToggle: (course: CourseWithSessionsAndMetadata) => void;
+  onTotal?: (total: number | null) => void;
 }) {
   const [items, setItems] = useState<CourseWithSessionsAndMetadata[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -69,13 +72,16 @@ export function CourseList({
         setCursor(json.nextCursor ?? null);
         setHasMore(Boolean(json.nextCursor));
         setStatus("ready");
+        onTotal?.(json.total ?? null);
       })
       .catch((err) => {
         if (ctrl.signal.aborted || id !== reqId.current) return;
         console.error("[CourseList] load failed:", err);
         setStatus("error");
+        onTotal?.(null);
       });
     return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, filters, retryNonce]);
 
   const loadMore = useCallback(() => {

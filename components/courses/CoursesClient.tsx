@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 export function CoursesClient({ userEmail }: { userEmail: string | null }) {
   const [q, setQ] = useState("");
   const [filters, setFilters] = useState<SearchFilters>({});
+  const [total, setTotal] = useState<number | null>(null);
   const selection = useTimetableSelection(userEmail);
 
   return (
@@ -27,6 +28,9 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
           <h1 className="text-xl font-semibold">課程搜尋</h1>
         </header>
         <CourseSearchBar onSearch={setQ} />
+        <p className="text-xs text-muted-foreground">
+          共 {total == null ? "—" : total.toLocaleString()} 筆結果
+        </p>
 
         {/* 課程大類 — single-select row directly under the search bar.
             「全部」清掉大類篩選 → 顯示所有課程。 */}
@@ -162,6 +166,7 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
             filters={filters}
             isSelected={selection.isSelected}
             onToggle={selection.toggle}
+            onTotal={setTotal}
           />
         </section>
       </div>
