@@ -144,6 +144,8 @@ function ReviewsTab({ courseName, teacher, loggedIn }: { courseName: string; tea
 
       {notice && <p className="text-sm text-[hsl(var(--warning))]">{notice}</p>}
 
+      {loading && <p className="text-sm text-muted-foreground">載入中…</p>}
+
       {/* 新增評論 按鈕（左上）/ 表單 */}
       {loggedIn ? (
         form ? (
@@ -169,9 +171,7 @@ function ReviewsTab({ courseName, teacher, loggedIn }: { courseName: string; tea
         </p>
       )}
 
-      {loading ? (
-        <p className="text-sm text-muted-foreground">載入中…</p>
-      ) : (
+      {!loading && (
         <ul className="space-y-3">
           {reviews.map((rv) => (
             <li key={rv.id} className="rounded-lg border border-border p-3">
@@ -428,7 +428,7 @@ function GradesTab({ courseName, teacher, loggedIn }: { courseName: string; teac
         showForm ? (
           <GradeForm courseName={courseName} teacher={teacher} available={available} onSaved={() => { setShowForm(false); load(); }} onCancel={() => setShowForm(false)} />
         ) : available.length > 0 ? (
-          <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>新增成績分布</Button>
+          <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>＋ 新增成績分布</Button>
         ) : (
           !loading && <p className="text-xs text-muted-foreground">所有學期皆已有成績分布。</p>
         )

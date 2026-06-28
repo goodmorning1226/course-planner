@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CourseSearchBar } from "@/components/courses/CourseSearchBar";
 import {
   CourseFilters,
@@ -10,6 +10,7 @@ import { CourseList } from "@/components/courses/CourseList";
 import { DeptPicker } from "@/components/courses/DeptPicker";
 import { COURSE_CATEGORIES, GE_AREA_LABELS } from "@/lib/courses/classification";
 import { useTimetableSelection } from "@/lib/timetable/useTimetableSelection";
+import { loadSearchSnapshot, type CourseListInitial } from "@/lib/courses/searchState";
 import { cn } from "@/lib/utils";
 
 // Interactive body of the search page. Auth state arrives from the server
@@ -18,7 +19,32 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
   const [q, setQ] = useState("");
   const [filters, setFilters] = useState<SearchFilters>({});
   const [total, setTotal] = useState<number | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+  const initialList = useRef<CourseListInitial | null>(null);
   const selection = useTimetableSelection(userEmail);
+
+  // Restore the previous search (query/filters/results/scroll) on first mount,
+  // so Back from a course's 修課情報 lands exactly where the user left off.
+  useEffect(() => {
+    const snap = loadSearchSnapshot();
+    if (snap) {
+      setQ(snap.q ?? "");
+      setFilters(snap.filters ?? {});
+      setTotal(snap.total ?? null);
+      initialList.current = {
+        items: snap.items,
+        cursor: snap.cursor,
+        hasMore: snap.hasMore,
+        total: snap.total,
+        scrollY: snap.scrollY,
+      };
+    }
+    setHydrated(true);
+  }, []);
+
+  if (!hydrated) {
+    return <div className="py-16 text-center text-sm text-muted-foreground">載入中…</div>;
+  }
 
   return (
     <div className="space-y-4">
@@ -27,7 +53,7 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
         <header className="text-center">
           <h1 className="text-xl font-semibold">課程搜尋</h1>
         </header>
-        <CourseSearchBar onSearch={setQ} />
+        <CourseSearchBar onSearch={setQ} initialValue={q} />
         <p className="text-xs text-muted-foreground">
           共 {total == null ? "—" : total.toLocaleString()} 筆結果
         </p>
@@ -167,6 +193,7 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
             isSelected={selection.isSelected}
             onToggle={selection.toggle}
             onTotal={setTotal}
+            initialData={initialList.current}
           />
         </section>
       </div>

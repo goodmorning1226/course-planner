@@ -5,6 +5,7 @@ import type { CourseWithSessionsAndMetadata } from "@/lib/courses/types";
 import type { SearchFilters } from "./CourseFilters";
 import { CourseCard } from "./CourseCard";
 import { Button } from "@/components/ui/button";
+import { saveSearchSnapshot, type CourseListInitial } from "@/lib/courses/searchState";
 
 // Fetches /api/courses with cursor pagination and renders results with infinite
 // scroll (IntersectionObserver sentinel — no traditional pager). Handles
@@ -39,25 +40,37 @@ export function CourseList({
   isSelected,
   onToggle,
   onTotal,
+  initialData,
 }: {
   q: string;
   filters: SearchFilters;
   isSelected: (id: string) => boolean;
   onToggle: (course: CourseWithSessionsAndMetadata) => void;
   onTotal?: (total: number | null) => void;
+  initialData?: CourseListInitial | null;
 }) {
-  const [items, setItems] = useState<CourseWithSessionsAndMetadata[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [status, setStatus] = useState<Status>("loading");
+  // Hydrate from a restored snapshot (Back from 修課情報) when present.
+  const [items, setItems] = useState<CourseWithSessionsAndMetadata[]>(initialData?.items ?? []);
+  const [cursor, setCursor] = useState<string | null>(initialData?.cursor ?? null);
+  const [hasMore, setHasMore] = useState(initialData ? initialData.hasMore : true);
+  const [status, setStatus] = useState<Status>(initialData ? "ready" : "loading");
   const [retryNonce, setRetryNonce] = useState(0);
 
   // Bumped on every new search; in-flight responses with a stale id are ignored.
   const reqId = useRef(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const skipInitial = useRef(!!initialData); // restored → don't refetch page 1
+  const totalRef = useRef<number | null>(initialData?.total ?? null);
 
-  // Page 1 whenever the query or filters change.
+  // Page 1 whenever the query or filters change (skipped once on Back-restore).
   useEffect(() => {
+    if (skipInitial.current) {
+      skipInitial.current = false;
+      const y = initialData?.scrollY ?? 0;
+      // two frames so the restored list has laid out before we scroll.
+      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
+      return;
+    }
     const id = ++reqId.current;
     const ctrl = new AbortController();
     setStatus("loading");
@@ -72,6 +85,7 @@ export function CourseList({
         setCursor(json.nextCursor ?? null);
         setHasMore(Boolean(json.nextCursor));
         setStatus("ready");
+        totalRef.current = json.total ?? null;
         onTotal?.(json.total ?? null);
       })
       .catch((err) => {
@@ -83,6 +97,26 @@ export function CourseList({
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, filters, retryNonce]);
+
+  // Persist the whole search state on unmount (navigating to 修課情報) so Back
+  // restores query/filters/results/scroll. Refs hold the latest values.
+  const snapRef = useRef({ items, cursor, hasMore, q, filters });
+  snapRef.current = { items, cursor, hasMore, q, filters };
+  useEffect(
+    () => () => {
+      const s = snapRef.current;
+      saveSearchSnapshot({
+        q: s.q,
+        filters: s.filters,
+        items: s.items,
+        cursor: s.cursor,
+        hasMore: s.hasMore,
+        total: totalRef.current,
+        scrollY: window.scrollY,
+      });
+    },
+    []
+  );
 
   const loadMore = useCallback(() => {
     if (!cursor) return;

@@ -9,10 +9,12 @@ import { Button } from "@/components/ui/button";
 // form searches immediately.
 export function CourseSearchBar({
   onSearch,
+  initialValue = "",
 }: {
   onSearch: (q: string) => void;
+  initialValue?: string;
 }) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initialValue);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounced search as the user types.
