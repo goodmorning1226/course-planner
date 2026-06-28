@@ -28,20 +28,30 @@ export function matchKey(name: string, teacher: string | null | undefined): stri
   return `${normName(name)}|${normTeacher(teacher)}`;
 }
 
-/** Normalise a semester to canonical "XXX-Y". Accepts "1131" and "113-1". null if bad. */
+// 115 學期尚未開始，所以評論/成績分布的學期最晚只到 114-2。
+export const MAX_SEMESTER = "114-2";
+
+/** Normalise a semester to canonical "XXX-Y". Accepts "1131" and "113-1".
+ *  Returns null for bad input OR for semesters later than MAX_SEMESTER. */
 export function normSemester(s: string | null | undefined): string | null {
   if (!s) return null;
   const t = s.trim();
-  if (/^\d{3}-[12]$/.test(t)) return t;
-  if (/^\d{4}$/.test(t) && (t[3] === "1" || t[3] === "2")) return `${t.slice(0, 3)}-${t[3]}`;
-  return null;
+  let canon: string | null = null;
+  if (/^\d{3}-[12]$/.test(t)) canon = t;
+  else if (/^\d{4}$/.test(t) && (t[3] === "1" || t[3] === "2")) canon = `${t.slice(0, 3)}-${t[3]}`;
+  if (!canon || canon > MAX_SEMESTER) return null; // fixed-width → lexical compare is safe
+  return canon;
 }
 
-/** Recent semesters for the picker (newest first). Through current 115-2. */
+/** Selectable semesters (newest first), capped at MAX_SEMESTER down to 108-1. */
 export const SEMESTER_OPTIONS: string[] = (() => {
+  const [maxYear, maxTerm] = MAX_SEMESTER.split("-").map(Number);
   const out: string[] = [];
-  for (let year = 115; year >= 108; year--) {
-    out.push(`${year}-2`, `${year}-1`);
+  for (let year = maxYear; year >= 108; year--) {
+    for (const term of [2, 1]) {
+      if (year === maxYear && term > maxTerm) continue;
+      out.push(`${year}-${term}`);
+    }
   }
   return out;
 })();

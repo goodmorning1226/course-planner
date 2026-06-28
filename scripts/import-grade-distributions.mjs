@@ -45,11 +45,14 @@ const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_
 const normName = (s) => (s ?? "").replace(/[\s　]+/g, " ").trim();
 const normTeacher = (s) => (s ?? "").replace(/[（(]\s*\d+\s*[)）]\s*$/, "").replace(/[\s　]+/g, "").trim();
 const matchKey = (name, teacher) => `${normName(name)}|${normTeacher(teacher)}`;
+const MAX_SEMESTER = "114-2"; // 115 學期尚未開始
 function normSemester(s) {
   const t = (s ?? "").trim();
-  if (/^\d{3}-[12]$/.test(t)) return t;
-  if (/^\d{4}$/.test(t) && (t[3] === "1" || t[3] === "2")) return `${t.slice(0, 3)}-${t[3]}`;
-  return null;
+  let canon = null;
+  if (/^\d{3}-[12]$/.test(t)) canon = t;
+  else if (/^\d{4}$/.test(t) && (t[3] === "1" || t[3] === "2")) canon = `${t.slice(0, 3)}-${t[3]}`;
+  if (!canon || canon > MAX_SEMESTER) return null; // 跳過格式錯誤或晚於 114-2 的學期
+  return canon;
 }
 
 // --- tiny RFC-4180 CSV parser (handles quotes, embedded commas/newlines) ------

@@ -1,6 +1,7 @@
 // Zod schemas for server-side validation. Never trust client input.
 
 import { z } from "zod";
+import { MAX_SEMESTER } from "@/lib/reviews/key";
 
 /** Auth: password rule is intentionally lenient — min 8 chars, no extras. */
 export const credentialsSchema = z.object({
@@ -109,7 +110,11 @@ const ASSIGNABLE_SLUGS = CATEGORY_SLUGS.filter((s) => s !== "uncategorized") as 
 >[];
 // --- 修課情報：課程評價 + 成績分布 -------------------------------------------
 
-const SEMESTER = z.string().regex(/^\d{3}-[12]$/, "學期格式不合法");
+// 115 學期尚未開始 → 學期最晚只到 114-2（固定寬度，字串比較即可）。
+const SEMESTER = z
+  .string()
+  .regex(/^\d{3}-[12]$/, "學期格式不合法")
+  .refine((s) => s <= MAX_SEMESTER, `學期不可晚於 ${MAX_SEMESTER}`);
 const HALF_STAR = z
   .number()
   .refine((v) => [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].includes(v), "評分需為 0.5 倍數，介於 0.5–5");

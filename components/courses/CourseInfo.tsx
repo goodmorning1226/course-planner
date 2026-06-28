@@ -182,7 +182,7 @@ function ReviewsTab({ courseName, teacher, loggedIn }: { courseName: string; tea
 }
 
 function ReviewForm({ courseName, teacher, reviews, onSaved }: { courseName: string; teacher: string | null; reviews: CourseReview[]; onSaved: () => void }) {
-  const [semester, setSemester] = useState(SEMESTER_OPTIONS[1]); // default 115-1
+  const [semester, setSemester] = useState(SEMESTER_OPTIONS[0]); // default 最新 (114-2)
   const [ratings, setRatings] = useState<Record<AxisKey, number>>({ overall: 0, sweet: 0, chill: 0, solid: 0 });
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
