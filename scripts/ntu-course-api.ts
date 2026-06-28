@@ -24,7 +24,13 @@ const BASE = "https://course.ntu.edu.tw";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
-/** Category slugs we bulk-crawl (分班編組 needs a code → not bulk-listable). */
+/**
+ * Category slugs we bulk-crawl. NOTE: 校際(interschool) is intentionally NOT
+ * crawled — that category is entirely OTHER schools' courses (師大/台科…) taught
+ * off-campus, which never appear in 台大's classroom schedule. Crawling it only
+ * polluted the match pool (台大 courses name-matched same-named 外校 courses and
+ * wrongly inherited 校際 + 外校系所碼). (分班編組 needs a code → not bulk-listable.)
+ */
 export const CATEGORIES: { slug: string; label: string }[] = [
   { slug: "dept", label: "系所" },
   { slug: "general", label: "通識/溝通" },
@@ -32,9 +38,11 @@ export const CATEGORIES: { slug: string; label: string }[] = [
   { slug: "pearmy", label: "體育/國防" },
   { slug: "program", label: "學程" },
   { slug: "expertise", label: "領域專長" },
-  { slug: "interschool", label: "校際" },
   { slug: "english", label: "進階英語" },
 ];
+
+/** Cross-school / 校際 / 聯盟 dept ids — never tag our (台大) courses with these. */
+const EXTERNAL_DEPTS = new Set(["K010", "K020", "K030", "G010", "F010", "F020", "L010"]);
 
 // Each category's search needs its own extra query fields (empty = "all").
 const CATEGORY_EXTRAS: Record<string, Record<string, unknown>> = {
@@ -44,7 +52,6 @@ const CATEGORY_EXTRAS: Record<string, Record<string, unknown>> = {
   pearmy: { peArmyCourseTypes: [] },
   program: { programs: [] },
   expertise: { departments: [], isCompulsory: null },
-  interschool: { courseProviders: [] },
   english: { departments: [], isCompulsory: null },
 };
 
@@ -173,7 +180,7 @@ export async function fetchNtuCatalog(
           }
           for (const t of c.courseTargets ?? []) {
             for (const g of t.generalMarks ?? []) if (/^A[1-8]$/.test(g)) info.ge.add(g);
-            if (t.department?.id) info.depts.add(t.department.id);
+            if (t.department?.id && !EXTERNAL_DEPTS.has(t.department.id)) info.depts.add(t.department.id);
             const dept = t.department?.name;
             if (dept && dept !== "default") {
               info.requirements.push({ dept, compulsory: t.isCompulsory ?? null });

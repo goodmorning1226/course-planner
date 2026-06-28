@@ -14,7 +14,9 @@
     "curriculum:coursemap": "node scripts/fetch-coursemap.mjs",
     "curriculum:undergrad": "node scripts/fetch-required-undergrad.mjs",
     "curriculum:grad": "node scripts/fetch-required-grad.mjs",
-    "curriculum:apply": "node scripts/apply-curriculum.mjs"
+    "curriculum:apply": "node scripts/apply-curriculum.mjs",
+    "interschool:fetch": "node scripts/fetch-interschool-ntust.mjs",
+    "interschool:apply": "node scripts/apply-interschool.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

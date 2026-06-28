@@ -48,7 +48,7 @@ const FORCE =
 // Sources that count as a CONFIRMED classification (code match / official /
 // explicit override). Name-matches and inference are NOT confirmed, so the
 // safeguard lets a later run re-evaluate them.
-const CONFIRMED_SOURCES = new Set(["historical_match", "official_1151", "manual", "coursemap"]);
+const CONFIRMED_SOURCES = new Set(["historical_match", "official_1151", "manual", "coursemap", "ntust_interschool"]);
 const NAME_MATCH_SOURCE = "historical_name_match";
 
 const IS_OFFICIAL = SEMESTER === "115-1";

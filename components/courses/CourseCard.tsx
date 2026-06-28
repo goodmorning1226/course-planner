@@ -45,6 +45,14 @@ export function CourseCard({
           <p className="text-xs text-muted-foreground">{meta.join("　·　")}</p>
         )}
 
+        {/* 校際課程：開放台大名額 (only on interschool/外校 courses) */}
+        {course.interschool_quota != null && (
+          <p className="text-xs font-medium text-[hsl(var(--warning))]">
+            校際　開放台大名額 {course.interschool_quota}
+            {course.interschool_taken != null && `（已選 ${course.interschool_taken}）`}
+          </p>
+        )}
+
         {/* Meta rows: one per session, time/room as badges */}
         {course.sessions.length > 0 ? (
           <ul className="space-y-1.5">

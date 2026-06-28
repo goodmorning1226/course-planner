@@ -48,6 +48,9 @@ export interface Course {
   source_url: string | null;
   /** 爬取時間 (ISO string). */
   scraped_at: string;
+  /** 校際課程：開放台大名額 / 已選台大人數 (null = 一般台大課程). */
+  interschool_quota?: number | null;
+  interschool_taken?: number | null;
   created_at: string;
   updated_at: string;
 }
