@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { LineChart, type Point } from "./LineChart";
 
 interface Stats {
   courses: number;
@@ -14,6 +15,12 @@ interface Stats {
   users: number;
   usersWithCourses: number;
   lastScrape: { status: string; finished_at: string | null; course_count: number } | null;
+  series?: {
+    usersAllTime: Point[];
+    usersToday: Point[];
+    pvAllTime: Point[];
+    pvToday: Point[];
+  };
 }
 interface BuildingProgress {
   building: string;
@@ -115,6 +122,16 @@ export function AdminDashboard() {
           value={stats?.lastScrape ? `${stats.lastScrape.course_count} 門` : "—"}
         />
       </div>
+
+      {/* Trend charts: 使用者 / 瀏覽數, each 全期 + 今日 */}
+      {stats?.series && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <LineChart title="使用者（全期累計）" data={stats.series.usersAllTime} />
+          <LineChart title="使用者（今日累計）" data={stats.series.usersToday} />
+          <LineChart title="瀏覽數（全期累計）" data={stats.series.pvAllTime} />
+          <LineChart title="瀏覽數（今日每小時）" data={stats.series.pvToday} />
+        </div>
+      )}
 
       {/* Quick links */}
       <Link

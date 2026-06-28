@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CourseWithSessions } from "@/lib/courses/types";
 import { useSelectedCourses } from "./useSelectedCourses";
+import { getClientId } from "@/lib/client-id";
 
 export interface TimetableSelection {
   /** True once the relevant source (localStorage or cloud) has loaded. */
@@ -103,6 +104,21 @@ export function useTimetableSelection(
       setError("移除失敗，請稍後再試。");
     }
   }, []);
+
+  // Anonymous visitors: report how many courses they have (PII-free) so the
+  // admin 已排課人數 can include people who排課 without registering. Debounced.
+  const anonCount = local.courses.length;
+  useEffect(() => {
+    if (loggedIn || !local.ready) return;
+    const t = setTimeout(() => {
+      fetch("/api/track-timetable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: getClientId(), courseCount: anonCount }),
+      }).catch(() => {});
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [loggedIn, local.ready, anonCount]);
 
   const isSelected = useCallback(
     (id: string) => (loggedIn ? cloudIds.has(id) : local.isSelected(id)),
