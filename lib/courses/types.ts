@@ -181,6 +181,60 @@ export interface TimetableCourse {
   created_at: string;
 }
 
+// --- 修課情報：課程評價 + 成績分布 -------------------------------------------
+
+/** A user's review of a course (identity = course_name + teacher). */
+export interface CourseReview {
+  id: string;
+  course_name: string;
+  teacher: string | null;
+  semester: string;
+  rating_overall: number; // 總體 0.5..5 (half steps)
+  rating_sweet: number;   // 甜度
+  rating_chill: number;   // 涼度
+  rating_solid: number;   // 扎實
+  comment: string | null;
+  like_count: number;
+  report_count: number;
+  created_at: string;
+  updated_at: string;
+  /** Whether the current viewer liked this (filled by the API when logged in). */
+  liked?: boolean;
+  /** Whether the current viewer owns this review. */
+  mine?: boolean;
+}
+
+/** Average ratings + count across all reviews of a course. */
+export interface ReviewAggregate {
+  count: number;
+  overall: number | null;
+  sweet: number | null;
+  chill: number | null;
+  solid: number | null;
+}
+
+/** Grade distribution (percentages per bucket) for a course in one semester. */
+export interface GradeDistribution {
+  id: string;
+  course_name: string;
+  teacher: string | null;
+  semester: string;
+  a_plus: number | null; a: number | null; a_minus: number | null;
+  b_plus: number | null; b: number | null; b_minus: number | null;
+  c_plus: number | null; c: number | null; c_minus: number | null;
+  f: number | null;
+  note: string | null;
+  source: string | null;
+}
+
+/** The 10 grade buckets, in display order, with their column keys. */
+export const GRADE_BUCKETS: { key: keyof GradeDistribution; label: string }[] = [
+  { key: "a_plus", label: "A+" }, { key: "a", label: "A" }, { key: "a_minus", label: "A-" },
+  { key: "b_plus", label: "B+" }, { key: "b", label: "B" }, { key: "b_minus", label: "B-" },
+  { key: "c_plus", label: "C+" }, { key: "c", label: "C" }, { key: "c_minus", label: "C-" },
+  { key: "f", label: "F" },
+];
+
 /** Filters accepted by the course search endpoint. */
 export interface CourseSearchFilters {
   q?: string;

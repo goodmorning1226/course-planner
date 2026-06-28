@@ -107,6 +107,51 @@ const ASSIGNABLE_SLUGS = CATEGORY_SLUGS.filter((s) => s !== "uncategorized") as 
   (typeof CATEGORY_SLUGS)[number],
   "uncategorized"
 >[];
+// --- 修課情報：課程評價 + 成績分布 -------------------------------------------
+
+const SEMESTER = z.string().regex(/^\d{3}-[12]$/, "學期格式不合法");
+const HALF_STAR = z
+  .number()
+  .refine((v) => [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5].includes(v), "評分需為 0.5 倍數，介於 0.5–5");
+const PERCENT = z.number().min(0, "不可小於 0").max(100, "不可大於 100").nullable().optional();
+
+/** Query for GET /api/reviews + /api/grades — identify the course. */
+export const courseInfoQuerySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  teacher: z.string().trim().max(100).optional(),
+});
+
+/** Body for POST/PUT /api/reviews — create or edit own review. */
+export const reviewBodySchema = z.object({
+  courseName: z.string().trim().min(1, "缺少課名").max(200),
+  teacher: z.string().trim().max(100).optional().nullable(),
+  semester: SEMESTER,
+  overall: HALF_STAR,
+  sweet: HALF_STAR,
+  chill: HALF_STAR,
+  solid: HALF_STAR,
+  comment: z.string().trim().max(500, "評論最多 500 字").optional().nullable(),
+});
+export type ReviewBody = z.infer<typeof reviewBodySchema>;
+
+/** Body for POST /api/reviews/[id]/report. */
+export const reportBodySchema = z.object({
+  reason: z.string().trim().max(300).optional(),
+});
+
+/** Body for POST /api/grades — submit/edit a grade distribution. */
+export const gradeBodySchema = z.object({
+  courseName: z.string().trim().min(1, "缺少課名").max(200),
+  teacher: z.string().trim().max(100).optional().nullable(),
+  semester: SEMESTER,
+  aPlus: PERCENT, a: PERCENT, aMinus: PERCENT,
+  bPlus: PERCENT, b: PERCENT, bMinus: PERCENT,
+  cPlus: PERCENT, c: PERCENT, cMinus: PERCENT,
+  f: PERCENT,
+  note: z.string().trim().max(300).optional().nullable(),
+});
+export type GradeBody = z.infer<typeof gradeBodySchema>;
+
 export const manualClassifySchema = z.object({
   courseId: z.string().uuid("無效的課程 id"),
   categories: z

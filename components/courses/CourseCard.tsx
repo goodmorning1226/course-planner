@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type {
   CourseSession,
   CourseWithSessionsAndMetadata,
@@ -22,6 +23,9 @@ export function CourseCard({
   isSelected?: boolean;
   onToggle?: (course: CourseWithSessionsAndMetadata) => void;
 }) {
+  const infoHref =
+    `/course-info?name=${encodeURIComponent(course.course_name)}` +
+    (course.teacher ? `&teacher=${encodeURIComponent(course.teacher)}` : "");
   // Course-level secondary facts, missing ones dropped.
   const meta = [
     course.teacher && `教師 ${course.teacher}`,
@@ -81,31 +85,41 @@ export function CourseCard({
         />
       </div>
 
-      {/* Action: clear add / added + remove */}
-      <div className="flex shrink-0 items-center gap-2">
-        {isSelected ? (
-          <>
-            <span className="text-xs font-medium text-foreground">已加入 ✓</span>
+      {/* Action: 修課情報 + add/remove. Mobile: one right-aligned row, equal
+          width, 修課情報 on the left. Desktop: stacked (add on top). */}
+      <div className="flex shrink-0 items-center justify-end gap-2 sm:flex-col-reverse sm:items-end">
+        <Link
+          href={infoHref}
+          aria-label={`修課情報 ${course.course_name}`}
+          className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-muted px-3 text-sm font-medium text-foreground transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
+        >
+          修課情報
+        </Link>
+        <div className="flex items-center justify-end gap-2">
+          {isSelected ? (
+            <>
+              <span className="text-xs font-medium text-foreground">已加入 ✓</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onToggle?.(course)}
+                aria-label={`從課表移除 ${course.course_name}`}
+              >
+                移除
+              </Button>
+            </>
+          ) : removed ? (
+            <span className="text-xs font-medium text-muted-foreground">已停開</span>
+          ) : (
             <Button
               size="sm"
-              variant="outline"
               onClick={() => onToggle?.(course)}
-              aria-label={`從課表移除 ${course.course_name}`}
+              aria-label={`加入課表 ${course.course_name}`}
             >
-              移除
+              加入課表
             </Button>
-          </>
-        ) : removed ? (
-          <span className="text-xs font-medium text-muted-foreground">已停開</span>
-        ) : (
-          <Button
-            size="sm"
-            onClick={() => onToggle?.(course)}
-            aria-label={`加入課表 ${course.course_name}`}
-          >
-            加入課表
-          </Button>
-        )}
+          )}
+        </div>
       </div>
     </Card>
   );

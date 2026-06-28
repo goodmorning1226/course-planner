@@ -19,6 +19,9 @@ export const RATE_LIMITS = {
   auth: { limit: 8, windowMs: MINUTE },
   // Scrape trigger: extremely low; admin-only.
   scrape: { limit: 3, windowMs: HOUR },
+  // 修課情報: reviews/grades read + write.
+  reviewRead: { limit: 90, windowMs: MINUTE },
+  reviewWrite: { limit: 30, windowMs: MINUTE },
 } as const;
 
 interface Bucket {

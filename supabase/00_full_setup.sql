@@ -293,6 +293,69 @@ create index if not exists idx_course_changes_day on public.course_changes(chang
 create index if not exists idx_course_changes_run on public.course_changes(run_id);
 alter table public.course_changes enable row level security;
 
+-- ============================ 5d. REVIEWS + GRADES (see 12_reviews_grades.sql) =
+-- 修課情報：課程評價 + 成績分布（以 match_key=正規化 課名|教師 當課程身分）。
+create table if not exists public.course_reviews (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  course_name text not null, teacher text, match_key text not null, semester text not null,
+  rating_overall numeric(2,1) not null, rating_sweet numeric(2,1) not null,
+  rating_chill numeric(2,1) not null, rating_solid numeric(2,1) not null,
+  comment text, like_count int not null default 0, report_count int not null default 0,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  constraint chk_review_ratings check (
+    rating_overall in (0.5,1,1.5,2,2.5,3,3.5,4,4.5,5) and rating_sweet in (0.5,1,1.5,2,2.5,3,3.5,4,4.5,5) and
+    rating_chill in (0.5,1,1.5,2,2.5,3,3.5,4,4.5,5) and rating_solid in (0.5,1,1.5,2,2.5,3,3.5,4,4.5,5)),
+  constraint uq_review_user_course_sem unique (user_id, match_key, semester)
+);
+create index if not exists idx_reviews_match on public.course_reviews(match_key);
+create index if not exists idx_reviews_user on public.course_reviews(user_id);
+drop trigger if exists trg_course_reviews_updated_at on public.course_reviews;
+create trigger trg_course_reviews_updated_at before update on public.course_reviews
+  for each row execute function public.set_updated_at();
+alter table public.course_reviews enable row level security;
+drop policy if exists "course_reviews_select_public" on public.course_reviews;
+create policy "course_reviews_select_public" on public.course_reviews for select using (true);
+drop policy if exists "course_reviews_insert_own" on public.course_reviews;
+create policy "course_reviews_insert_own" on public.course_reviews for insert with check (auth.uid() = user_id);
+drop policy if exists "course_reviews_update_own" on public.course_reviews;
+create policy "course_reviews_update_own" on public.course_reviews for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "course_reviews_delete_own" on public.course_reviews;
+create policy "course_reviews_delete_own" on public.course_reviews for delete using (auth.uid() = user_id);
+
+create table if not exists public.review_likes (
+  review_id uuid not null references public.course_reviews(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(), primary key (review_id, user_id)
+);
+alter table public.review_likes enable row level security;
+
+create table if not exists public.review_reports (
+  id uuid primary key default gen_random_uuid(),
+  review_id uuid not null references public.course_reviews(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  reason text, created_at timestamptz not null default now(),
+  constraint uq_report_user_review unique (review_id, user_id)
+);
+alter table public.review_reports enable row level security;
+
+create table if not exists public.grade_distributions (
+  id uuid primary key default gen_random_uuid(),
+  course_name text not null, teacher text, match_key text not null, semester text not null,
+  a_plus numeric, a numeric, a_minus numeric, b_plus numeric, b numeric, b_minus numeric,
+  c_plus numeric, c numeric, c_minus numeric, f numeric,
+  note text, source text, submitted_by uuid references auth.users(id),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  constraint uq_grade_course_sem unique (match_key, semester)
+);
+create index if not exists idx_grades_match on public.grade_distributions(match_key);
+drop trigger if exists trg_grade_distributions_updated_at on public.grade_distributions;
+create trigger trg_grade_distributions_updated_at before update on public.grade_distributions
+  for each row execute function public.set_updated_at();
+alter table public.grade_distributions enable row level security;
+drop policy if exists "grade_distributions_select_public" on public.grade_distributions;
+create policy "grade_distributions_select_public" on public.grade_distributions for select using (true);
+
 -- ============================ 6. SAMPLE SEED (FAKE) ==========================
 -- Optional. Dummy data for local front-end development only. Delete this block
 -- if you only want the schema. user_timetables / timetable_courses are NOT

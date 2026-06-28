@@ -16,7 +16,8 @@
     "curriculum:grad": "node scripts/fetch-required-grad.mjs",
     "curriculum:apply": "node scripts/apply-curriculum.mjs",
     "interschool:fetch": "node scripts/fetch-interschool-ntust.mjs",
-    "interschool:apply": "node scripts/apply-interschool.mjs"
+    "interschool:apply": "node scripts/apply-interschool.mjs",
+    "grades:import": "node scripts/import-grade-distributions.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

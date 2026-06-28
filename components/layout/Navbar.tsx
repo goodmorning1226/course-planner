@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { isAdminEmail } from "@/lib/admin";
-import { LogoutButton } from "./LogoutButton";
+import { UserMenu } from "./UserMenu";
 import { NavLinks, ActiveNavLink } from "./NavLinks";
 import { TimetableIcon } from "@/components/icons/TimetableIcon";
 
@@ -29,18 +29,7 @@ export async function Navbar() {
           <NavLinks />
 
           {user ? (
-            <>
-              <span
-                className="ml-1 hidden max-w-[160px] truncate text-xs text-muted-foreground sm:inline"
-                title={user.email ?? ""}
-              >
-                {user.email}
-              </span>
-              {isAdminEmail(user.email) && (
-                <ActiveNavLink href="/admin" label="後台" />
-              )}
-              <LogoutButton />
-            </>
+            <UserMenu email={user.email ?? ""} isAdmin={isAdminEmail(user.email)} />
           ) : (
             <>
               <ActiveNavLink href="/login" label="登入" />
