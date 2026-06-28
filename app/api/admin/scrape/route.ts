@@ -16,6 +16,18 @@ import { scrapeSectionBodySchema } from "@/lib/validations";
 export async function POST(req: Request) {
   if (!(await getAdminUser())) return apiError("forbidden", "沒有權限。");
 
+  // Serverless (Vercel) can't run the Playwright crawl: no Chromium, the detached
+  // child dies when the function returns, and there's an execution-time limit.
+  // Fail loudly with instructions instead of silently spawning nothing.
+  if (process.env.VERCEL) {
+    return apiError(
+      "invalid_request",
+      "線上環境（serverless）無法直接執行爬蟲。請在本機連到正式 Supabase 執行：" +
+        "全爬 `npm run scrape && npm run enrich`；單區 `SCRAPE_ONLY=<value> SCRAPE_SECTION=<label> npm run scrape`、" +
+        "再 `ENRICH_BUILDING=<label> ENRICH_ONLY_NEW=1 npm run enrich`；台科 `npm run interschool:fetch && npm run interschool:apply -- --apply`。"
+    );
+  }
+
   let body: unknown = {};
   try {
     body = await req.json();
