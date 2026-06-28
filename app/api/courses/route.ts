@@ -77,6 +77,7 @@ export async function GET(req: Request) {
     courseType, dept, deptGrade,
     isGeneralEducation, geCategory, targetDepartment, requirement,
     classificationSource, classificationConfidence,
+    hideRemoved,
     cursor, limit,
   } = parsed.data;
 
@@ -168,6 +169,8 @@ export async function GET(req: Request) {
     // Course-level filters: building/college is an exact-label list (OR).
     if (buildings?.length) cq = cq.in("building_or_college", buildings);
     if (teacher) cq = cq.ilike("teacher", `%${teacher}%`);
+    // Soft-delete: 停開 courses stay searchable (marked) by default; hide on request.
+    if (hideRemoved === "true") cq = cq.eq("status", "active");
 
     // (2) Free-text search OR group.
     if (q) {

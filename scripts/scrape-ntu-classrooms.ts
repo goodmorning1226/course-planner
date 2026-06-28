@@ -17,27 +17,25 @@
  *           drive it with a headless browser (Playwright) rather than fetch.
  *   Rooms:  GET .../classrm/acarm/get-classroom-by-building?building=<建物>
  *           → JSON { room_ls: [{ cr_no }] }
- *   Data:   the course objects are NOT in the page's hidden inputs (those are
- *           empty). They live in the JS global `timeDT`, indexed by weekday then
- *           period column: timeDT[wk]["Info" + col] = [ courseObj, ... ].
- *           Each courseObj (field names from the site's cou_tooltip):
- *             cr_cono  流水號   → pk          e.g. "201 49810"
- *             cr_clas  班次     → class_group
- *             cr_cnam  課名     → course_name (required)
- *             cr_tenam 教師     → teacher     (may be empty)
- *             cr_no    教室     → classroom
- *             cr_time  時間     → raw_time_text e.g. "第1..8週 (一) 10:20~12:10"
- *   A course spanning several periods appears in several cells with the SAME
- *   cr_cono + cr_time → we dedupe by (cr_cono, weekday, cr_time, classroom) and
- *   group every cr_cono into one course (multiple meeting days = multiple
- *   sessions). weekday comes from the timeDT row; periods from the time range
- *   inside cr_time.
+ *   Data:   the course objects live in the JS global `timeDT`, indexed by weekday
+ *           then period column: timeDT[wk]["Info" + col] = [ courseObj, ... ].
+ *             cr_cono 流水號 → pk   cr_clas 班次   cr_cnam 課名   cr_tenam 教師
+ *             cr_no 教室     cr_time 時間 "第1..8週 (一) 10:20~12:10"
  * -------------------------------------------------------------------------
  *
- * POLITENESS / SAFETY (per spec): LOW FREQUENCY, sequential (never parallel),
- * delay between every request, normal User-Agent. Does NOT log in, does NOT
- * bypass any access control, only reads the publicly queryable schedule. Writes
- * use the SERVICE ROLE key (server-only).
+ * MODES (env):
+ *   SCRAPE_ONLY=<DDL value|"%">   scrape ONLY one section (a building, or "%"=其他).
+ *   SCRAPE_SECTION=<label>        run's section label (for the change log / UI).
+ *   SCRAPE_ORPHAN_ONLY=1          crawl only the 其他/% orphan rooms.
+ *   SCRAPE_RUN_ID / SCRAPE_DRY_RUN / SCRAPE_MAX_ROOMS / NTU_BUILDINGS as before.
+ *
+ * On each run we: detect added/changed courses (write a field-level change log),
+ * prune stale sessions (so a moved time/room doesn't leave a ghost in users'
+ * timetables), and SOFT-DELETE (status='removed', 停開) courses that vanished from
+ * the crawled section(s) — never a hard delete. Reappearing courses are restored.
+ *
+ * POLITENESS / SAFETY: LOW FREQUENCY, sequential, delayed, normal UA. Reads only
+ * the public schedule; writes use the SERVICE ROLE key (server-only).
  */
 
 import { chromium, type Browser, type BrowserContext } from "playwright";
@@ -71,6 +69,16 @@ const MAX_ROOMS = Number(process.env.SCRAPE_MAX_ROOMS ?? 0); // 0 = no cap
 const DRY_RUN =
   process.env.SCRAPE_DRY_RUN === "1" || process.env.SCRAPE_DRY_RUN === "true";
 
+// Single-section mode: a BuildingDDL value, or "%" for the 其他 orphan bucket.
+const ONLY = process.env.SCRAPE_ONLY ? process.env.SCRAPE_ONLY.trim() : null;
+// "%" target ≡ orphan-only crawl (named buildings only seed seenRooms).
+const ORPHAN_ONLY =
+  process.env.SCRAPE_ORPHAN_ONLY === "1" ||
+  process.env.SCRAPE_ORPHAN_ONLY === "true" ||
+  ONLY === "%";
+const RUN_SECTION = process.env.SCRAPE_SECTION ?? (ONLY ? ONLY : "all");
+const OTHER_LABEL = "其他";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -102,6 +110,30 @@ interface ParsedCourse {
   class_group: string | null;
   teacher: string | null;
   sessions: Map<string, ParsedSession>;
+}
+
+/** DB snapshot of an existing course, for change detection + soft-delete. */
+interface ExistingCourse {
+  id: string;
+  sig: string;
+  building: string | null;
+  name: string;
+  class_group: string | null;
+  teacher: string | null;
+  sessionKeys: Set<string>; // `${weekday}|${raw_time}|${classroom}|${periods}`
+  status: string; // 'active' | 'removed'
+}
+
+/** A row queued for the course_changes log. */
+interface ChangeRow {
+  run_id: string | null;
+  course_id: string | null;
+  course_pk: string | null;
+  course_name: string | null;
+  building_or_college: string | null;
+  change_type: string;
+  detail: Record<string, unknown> | null;
+  changed_on: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,15 +185,28 @@ function extractTimeRange(crTime: string | null): string | null {
   return m ? `${m[1]}-${m[2]}` : null;
 }
 
+/** Taiwan (UTC+8) date bucket "YYYY-MM-DD" for the change log. */
+function twDate(): string {
+  return new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** Session sig used for change detection (matches loadExisting / parsedSignature). */
+function sessionKeyOf(s: ParsedSession): string {
+  return `${s.weekday ?? ""}|${s.raw_time_text ?? ""}|${s.classroom ?? ""}|${s.periods.join(",")}`;
+}
+function parseKey(k: string): { weekday: string; time: string; classroom: string } {
+  const [weekday, time, classroom] = k.split("|");
+  return { weekday: weekday ?? "", time: time ?? "", classroom: classroom ?? "" };
+}
+function fmtKey(k: string): string {
+  const p = parseKey(k);
+  return `週${p.weekday || "?"} ${p.time || "?"}${p.classroom ? ` @${p.classroom}` : ""}`;
+}
+
 // ---------------------------------------------------------------------------
 // Scraping (Playwright)
 // ---------------------------------------------------------------------------
 
-/**
- * Building dropdown entries to crawl (excludes "" and "%"). We query by `value`
- * (e.g. "1") but store the human-readable `label` (e.g. "文學院") so the UI can
- * filter by it.
- */
 interface BuildingOpt {
   value: string;
   label: string;
@@ -251,8 +296,6 @@ function accumulate(
     const cono = nullIfEmpty(c.cr_cono);
     if (!courseName || !cono) continue; // course_name + 流水號 required
 
-    // A 流水號 (cr_cono) can be shared by several 班次 (cr_clas) — those are
-    // DIFFERENT courses. So the pk = 流水號 + 班次 (流水號 alone if no 班次).
     const classGroup = nullIfEmpty(c.cr_clas);
     const pk = classGroup ? `${cono}-${classGroup}` : cono;
 
@@ -273,10 +316,9 @@ function accumulate(
     const classroom = nullIfEmpty(c.cr_no) ?? nullIfEmpty(queriedRoom);
     const rawTime = nullIfEmpty(c.cr_time);
     const range = extractTimeRange(rawTime);
-    const periods = convertTimeRangeToPeriods(range); // [] if unparseable
+    const periods = convertTimeRangeToPeriods(range);
     const parsedRange = parseTimeRange(range);
 
-    // Dedupe the same session repeated across the period-columns it spans.
     const key = `${weekday ?? ""}|${rawTime ?? ""}|${classroom ?? ""}`;
     if (!course.sessions.has(key)) {
       course.sessions.set(key, {
@@ -304,7 +346,18 @@ function makeServiceClient(): SupabaseClient | null {
   });
 }
 
-async function persistCourse(supabase: SupabaseClient, course: ParsedCourse) {
+/**
+ * Upsert a course + its sessions, mark it active (restoring a 停開 course), and
+ * PRUNE stale sessions: any existing session of this course whose classroom is
+ * one of the rooms crawled in THIS section but was not re-seen is deleted — so a
+ * moved time/room doesn't leave a ghost. Scoping the prune to this section's
+ * rooms means a course that also meets in another building keeps those sessions.
+ */
+async function persistCourse(
+  supabase: SupabaseClient,
+  course: ParsedCourse,
+  roomsSet: Set<string>
+) {
   const { data: upserted, error: courseErr } = await supabase
     .from("courses")
     .upsert(
@@ -317,6 +370,8 @@ async function persistCourse(supabase: SupabaseClient, course: ParsedCourse) {
         teacher: course.teacher,
         source_url: QUERY_URL,
         scraped_at: new Date().toISOString(),
+        status: "active",
+        removed_at: null,
       },
       { onConflict: "semester,pk" }
     )
@@ -330,10 +385,6 @@ async function persistCourse(supabase: SupabaseClient, course: ParsedCourse) {
   const sessions = [...course.sessions.values()];
 
   if (sessions.length > 0) {
-    // Upsert (not delete-then-insert) so persisting per building is safe even
-    // for a course that meets in more than one building — its sessions
-    // accumulate; the unique (course_id, weekday, raw_time_text, classroom)
-    // makes re-runs idempotent.
     const { error: upErr } = await supabase.from("course_sessions").upsert(
       sessions.map((s) => ({
         course_id: courseId,
@@ -348,83 +399,131 @@ async function persistCourse(supabase: SupabaseClient, course: ParsedCourse) {
     );
     if (upErr) throw new Error(`upsert sessions failed: ${upErr.message}`);
   }
+
+  // Prune stale sessions in this section's rooms (delete-by-id; never touches
+  // sessions whose classroom belongs to another building).
+  if (roomsSet.size > 0) {
+    const seen = new Set(
+      sessions.map((s) => `${s.weekday ?? ""}|${s.raw_time_text ?? ""}|${s.classroom ?? ""}`)
+    );
+    const { data: existSess } = await supabase
+      .from("course_sessions")
+      .select("id, weekday, raw_time_text, classroom")
+      .eq("course_id", courseId);
+    const stale = (existSess ?? [])
+      .filter((s) => {
+        const cr = (s.classroom ?? "") as string;
+        if (!cr || !roomsSet.has(cr)) return false;
+        return !seen.has(`${s.weekday ?? ""}|${s.raw_time_text ?? ""}|${cr}`);
+      })
+      .map((s) => s.id as string);
+    if (stale.length) await supabase.from("course_sessions").delete().in("id", stale);
+  }
+
+  return courseId;
+}
+
+/** Persist the BuildingDDL value↔label map so the admin UI can drive sections. */
+async function persistBuildingMap(supabase: SupabaseClient, buildings: BuildingOpt[]) {
+  const rows = buildings.map((b) => ({ value: b.value, label: b.label, updated_at: new Date().toISOString() }));
+  rows.push({ value: "%", label: OTHER_LABEL, updated_at: new Date().toISOString() });
+  await supabase.from("scrape_buildings").upsert(rows, { onConflict: "value" });
 }
 
 // ---------------------------------------------------------------------------
-// Progress + change-detection (for the admin one-click scrape)
+// Progress + change-detection
 // ---------------------------------------------------------------------------
 
-/** Live per-building progress row for the admin UI. */
 async function setProgress(
   supabase: SupabaseClient,
   runId: string,
   building: string,
-  fields: Partial<{
-    scraped_count: number;
-    total_count: number;
-    done_rooms: number;
-    status: string;
-  }>
+  fields: Partial<{ scraped_count: number; total_count: number; done_rooms: number; status: string }>
 ) {
   await supabase
     .from("scrape_progress")
     .upsert({ run_id: runId, building, ...fields }, { onConflict: "run_id,building" });
 }
 
-/** Signature of a course's header + sessions, to detect "did it change?". */
-function courseSignature(c: {
-  building_or_college: string;
-  course_name: string;
-  class_group: string | null;
-  teacher: string | null;
-  sessionSigs: string[];
-}): string {
+function parsedSignature(c: ParsedCourse): string {
   return (
     [c.building_or_college, c.course_name, c.class_group ?? "", c.teacher ?? ""].join("|") +
     "::" +
-    [...c.sessionSigs].sort().join(";")
+    [...c.sessions.values()].map(sessionKeyOf).sort().join(";")
   );
 }
-function parsedSignature(c: ParsedCourse): string {
-  return courseSignature({
-    building_or_college: c.building_or_college,
-    course_name: c.course_name,
-    class_group: c.class_group,
-    teacher: c.teacher,
-    sessionSigs: [...c.sessions.values()].map(
-      (s) => `${s.weekday ?? ""}|${s.raw_time_text ?? ""}|${s.classroom ?? ""}|${s.periods.join(",")}`
-    ),
-  });
+
+/**
+ * Field-level diff between an existing course and its freshly-scraped form.
+ * Session changes are scoped to THIS section's rooms so a multi-building course
+ * isn't reported as "losing" its other building's sessions. Building relabels
+ * are intentionally omitted (last-writer noise on multi-building courses).
+ */
+function computeDiff(
+  prev: ExistingCourse,
+  course: ParsedCourse,
+  roomsSet: Set<string>
+): Record<string, unknown> {
+  const detail: Record<string, unknown> = {};
+  if (prev.name !== course.course_name) detail.name = { from: prev.name, to: course.course_name };
+  if ((prev.teacher ?? "") !== (course.teacher ?? ""))
+    detail.teacher = { from: prev.teacher, to: course.teacher };
+  if ((prev.class_group ?? "") !== (course.class_group ?? ""))
+    detail.class_group = { from: prev.class_group, to: course.class_group };
+
+  const newKeys = [...course.sessions.values()].map(sessionKeyOf);
+  const newSet = new Set(newKeys);
+  // Scope previous sessions to this section's rooms (or, when not crawling rooms,
+  // to all — e.g. a header-only run). null-classroom keys are out of scope.
+  const prevScoped = [...prev.sessionKeys].filter((k) =>
+    roomsSet.size === 0 ? true : roomsSet.has(parseKey(k).classroom)
+  );
+  const added = newKeys.filter((k) => !prev.sessionKeys.has(k));
+  const removed = prevScoped.filter((k) => !newSet.has(k));
+  if (added.length || removed.length) {
+    if (added.length === 1 && removed.length === 1) {
+      const a = parseKey(added[0]);
+      const r = parseKey(removed[0]);
+      if (a.classroom === r.classroom && a.time !== r.time) detail.time = { from: r.time, to: a.time };
+      else if (a.time === r.time && a.classroom !== r.classroom)
+        detail.classroom = { from: r.classroom, to: a.classroom };
+      else detail.sessions = { added: added.map(fmtKey), removed: removed.map(fmtKey) };
+    } else {
+      detail.sessions = { added: added.map(fmtKey), removed: removed.map(fmtKey) };
+    }
+  }
+  return detail;
 }
 
-/** Existing courses' signatures keyed by pk (for change detection). */
-async function loadExistingSignatures(
-  supabase: SupabaseClient
-): Promise<Map<string, string>> {
-  const sigs = new Map<string, string>();
+/** Existing courses keyed by pk: header + session keys + status, for diffing. */
+async function loadExisting(supabase: SupabaseClient): Promise<Map<string, ExistingCourse>> {
   const PAGE = 1000;
-  // courses
-  const headers = new Map<string, { id: string; sig: string; sessions: string[] }>();
+  const byId = new Map<string, ExistingCourse>();
+  const pkById = new Map<string, string>();
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("courses")
-      .select("id, pk, building_or_college, course_name, class_group, teacher")
+      .select("id, pk, building_or_college, course_name, class_group, teacher, status")
       .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) throw error;
     const rows = data ?? [];
     for (const r of rows) {
       if (!r.pk) continue;
-      headers.set(r.id as string, {
+      byId.set(r.id as string, {
         id: r.id as string,
-        sig: [r.building_or_college ?? "", r.course_name, r.class_group ?? "", r.teacher ?? ""].join("|"),
-        sessions: [],
+        sig: "",
+        building: (r.building_or_college as string) ?? null,
+        name: r.course_name as string,
+        class_group: (r.class_group as string) ?? null,
+        teacher: (r.teacher as string) ?? null,
+        sessionKeys: new Set(),
+        status: (r.status as string) ?? "active",
       });
-      sigs.set(r.pk as string, r.id as string); // temp: pk -> id
+      pkById.set(r.id as string, r.pk as string);
     }
     if (rows.length < PAGE) break;
   }
-  // sessions
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("course_sessions")
@@ -434,20 +533,21 @@ async function loadExistingSignatures(
     if (error) throw error;
     const rows = data ?? [];
     for (const s of rows) {
-      const h = headers.get(s.course_id as string);
-      if (h)
-        h.sessions.push(
+      const e = byId.get(s.course_id as string);
+      if (e)
+        e.sessionKeys.add(
           `${s.weekday ?? ""}|${s.raw_time_text ?? ""}|${s.classroom ?? ""}|${(s.periods ?? []).join(",")}`
         );
     }
     if (rows.length < PAGE) break;
   }
-  // final: pk -> full signature
-  const out = new Map<string, string>();
-  const idToHeader = new Map([...headers.values()].map((h) => [h.id, h]));
-  for (const [pk, id] of sigs) {
-    const h = idToHeader.get(id as string);
-    if (h) out.set(pk, h.sig + "::" + [...h.sessions].sort().join(";"));
+  const out = new Map<string, ExistingCourse>();
+  for (const [id, e] of byId) {
+    e.sig =
+      [e.building ?? "", e.name, e.class_group ?? "", e.teacher ?? ""].join("|") +
+      "::" +
+      [...e.sessionKeys].sort().join(";");
+    out.set(pkById.get(id)!, e);
   }
   return out;
 }
@@ -458,7 +558,7 @@ async function loadExistingSignatures(
 
 async function main() {
   console.log(
-    `[scrape] semester=${QUERY_SEMESTER} (db=${DB_SEMESTER}) dryRun=${DRY_RUN}`
+    `[scrape] semester=${QUERY_SEMESTER} (db=${DB_SEMESTER}) section=${RUN_SECTION} only=${ONLY ?? "-"} dryRun=${DRY_RUN}`
   );
 
   const writable = DRY_RUN ? null : makeServiceClient();
@@ -466,7 +566,6 @@ async function main() {
     console.warn("[scrape] Supabase env missing — switching to DRY RUN.");
   }
 
-  // The admin one-click trigger passes SCRAPE_RUN_ID so it can poll progress.
   const presetRunId = process.env.SCRAPE_RUN_ID || null;
   let runId: string | null = presetRunId;
   if (writable) {
@@ -476,24 +575,52 @@ async function main() {
         ...(presetRunId ? { id: presetRunId } : {}),
         semester: DB_SEMESTER,
         status: "running",
+        section: RUN_SECTION,
       })
       .select("id")
       .single();
     runId = (data?.id as string) ?? presetRunId;
   }
 
-  // Existing signatures → only write courses whose data actually changed.
-  const existing = writable ? await loadExistingSignatures(writable) : new Map<string, string>();
-  console.log(`[scrape] loaded ${existing.size} existing course signatures.`);
+  const existing = writable ? await loadExisting(writable) : new Map<string, ExistingCourse>();
+  console.log(`[scrape] loaded ${existing.size} existing courses.`);
+
+  const changeOn = twDate();
+  const changeBuf: ChangeRow[] = [];
+  function logChange(
+    type: string,
+    course: { pk: string | null; name: string | null; building: string | null; id?: string | null },
+    detail: Record<string, unknown> | null
+  ) {
+    changeBuf.push({
+      run_id: runId,
+      course_id: course.id ?? null,
+      course_pk: course.pk,
+      course_name: course.name,
+      building_or_college: course.building,
+      change_type: type,
+      detail,
+      changed_on: changeOn,
+    });
+  }
+  async function flushChanges() {
+    if (!writable || changeBuf.length === 0) return;
+    const rows = changeBuf.splice(0, changeBuf.length);
+    const { error } = await writable.from("course_changes").insert(rows);
+    if (error) console.warn(`[scrape] change-log insert failed: ${error.message}`);
+  }
 
   let browser: Browser | null = null;
   const skipped: string[] = [];
   const drySamples: ParsedCourse[] = [];
   let requests = 0;
   let totalCourses = 0;
-  let totalSessions = 0;
   let written = 0;
   let unchanged = 0;
+
+  const seenPks = new Set<string>();
+  const crawledLabels: string[] = [];
+  const sectionHealth = new Map<string, { rooms: number; errored: boolean }>();
 
   try {
     browser = await chromium.launch({ headless: true });
@@ -501,39 +628,39 @@ async function main() {
 
     const buildings = await fetchBuildings(ctx);
     requests++;
-    // Some courses (體育 at 網球場/球場, 新生專題, 外教 等) sit only under the
-    // "全部"(%) bucket — rooms that belong to NO named building — so they were
-    // missed. Append a final "其他" pass that crawls exactly those orphan rooms.
-    buildings.push({ value: "%", label: "其他" });
+    if (writable) await persistBuildingMap(writable, buildings);
+    buildings.push({ value: "%", label: OTHER_LABEL });
     const seenRooms = new Set<string>();
-    console.log(
-      `[scrape] buildings: ${buildings.length} → ${buildings.map((b) => b.label).join(",")}`
-    );
+    console.log(`[scrape] buildings: ${buildings.length} → ${buildings.map((b) => b.label).join(",")}`);
     await sleep(REQUEST_DELAY_MS);
 
-    // Crawl + PERSIST one building at a time, so an interruption only loses the
-    // current building's work, not the whole crawl.
     for (const { value, label } of buildings) {
+      // Single named-building target: skip everything else outright (no need to
+      // seed seenRooms — that only matters for the % orphan pass).
+      if (ONLY && ONLY !== "%" && value !== ONLY) continue;
+
       let rooms: string[] = [];
       try {
-        rooms = await fetchRooms(ctx, value); // room API keyed by value
+        rooms = await fetchRooms(ctx, value);
         requests++;
-        // "其他"(%) returns ALL rooms; keep only those not in a named building.
         if (value === "%") rooms = rooms.filter((r) => !seenRooms.has(r));
         else for (const r of rooms) seenRooms.add(r);
       } catch (err) {
         skipped.push(`building ${label}: ${(err as Error).message}`);
         console.warn(`[scrape] skip building ${label}: ${(err as Error).message}`);
+        sectionHealth.set(label, { rooms: 0, errored: true });
         await sleep(REQUEST_DELAY_MS);
         continue;
       }
-      // Fast path: only crawl the orphan ("其他") rooms; named buildings just
-      // seed seenRooms (their room lists) so we know what counts as orphan.
-      if (process.env.SCRAPE_ORPHAN_ONLY && value !== "%") {
+      // Orphan-only: named buildings just seed seenRooms; only crawl "%".
+      if (ORPHAN_ONLY && value !== "%") {
         await sleep(REQUEST_DELAY_MS);
         continue;
       }
       if (MAX_ROOMS > 0 && rooms.length > MAX_ROOMS) rooms = rooms.slice(0, MAX_ROOMS);
+      const roomsSet = new Set(rooms);
+      crawledLabels.push(label);
+      sectionHealth.set(label, { rooms: rooms.length, errored: false });
       console.log(`[scrape] building ${label}: ${rooms.length} rooms`);
       if (writable && runId)
         await setProgress(writable, runId, label, {
@@ -543,12 +670,14 @@ async function main() {
 
       const buildingCourses = new Map<string, ParsedCourse>();
       let roomIdx = 0;
+      let roomErrors = 0;
       for (const room of rooms) {
         try {
-          const raw = await fetchRoomCourses(ctx, value, room); // query by value
+          const raw = await fetchRoomCourses(ctx, value, room);
           requests++;
-          accumulate(raw, label, room, buildingCourses); // store readable label
+          accumulate(raw, label, room, buildingCourses);
         } catch (err) {
+          roomErrors++;
           skipped.push(`room ${label}/${room}: ${(err as Error).message}`);
           console.warn(`[scrape] skip ${label}/${room}: ${(err as Error).message}`);
         }
@@ -557,31 +686,61 @@ async function main() {
           await setProgress(writable, runId, label, {
             done_rooms: roomIdx, scraped_count: buildingCourses.size,
           });
-        await sleep(REQUEST_DELAY_MS); // gentle, sequential
+        await sleep(REQUEST_DELAY_MS);
       }
+      // A section that lost a large share of its rooms to errors is untrustworthy
+      // for soft-delete (could be a source glitch) — flag it.
+      if (rooms.length > 0 && roomErrors > rooms.length * 0.5)
+        sectionHealth.set(label, { rooms: rooms.length, errored: true });
 
       const list = [...buildingCourses.values()];
       totalCourses += list.length;
-      totalSessions += list.reduce((n, c) => n + c.sessions.size, 0);
 
       if (!writable) {
         drySamples.push(...list.slice(0, 2));
+        for (const c of list) seenPks.add(c.pk);
         continue;
       }
 
       let bWritten = 0;
       for (const course of list) {
+        seenPks.add(course.pk);
         try {
-          // Only write when the course's data actually changed (or is new).
+          const prev = existing.get(course.pk);
           const sig = parsedSignature(course);
-          if (existing.get(course.pk) === sig) {
-            unchanged++;
+          if (prev && prev.sig === sig) {
+            if (prev.status === "removed") {
+              await writable.from("courses").update({ status: "active", removed_at: null }).eq("id", prev.id);
+              prev.status = "active";
+              logChange("restored", { pk: course.pk, name: course.course_name, building: course.building_or_college, id: prev.id }, null);
+            } else {
+              unchanged++;
+            }
             continue;
           }
-          await persistCourse(writable, course);
-          existing.set(course.pk, sig);
-          written++;
+          const courseId = await persistCourse(writable, course, roomsSet);
           bWritten++;
+          written++;
+          if (!prev) {
+            logChange("added", { pk: course.pk, name: course.course_name, building: course.building_or_college, id: courseId }, null);
+          } else {
+            if (prev.status === "removed")
+              logChange("restored", { pk: course.pk, name: course.course_name, building: course.building_or_college, id: courseId }, null);
+            const diff = computeDiff(prev, course, roomsSet);
+            if (Object.keys(diff).length > 0)
+              logChange("updated", { pk: course.pk, name: course.course_name, building: course.building_or_college, id: courseId }, diff);
+          }
+          // Refresh the in-memory snapshot so a later building doesn't re-diff.
+          existing.set(course.pk, {
+            id: courseId,
+            sig,
+            building: course.building_or_college,
+            name: course.course_name,
+            class_group: course.class_group,
+            teacher: course.teacher,
+            sessionKeys: new Set([...course.sessions.values()].map(sessionKeyOf)),
+            status: "active",
+          });
         } catch (err) {
           skipped.push(`persist ${course.course_name}: ${(err as Error).message}`);
           console.warn(`[scrape] persist failed: ${(err as Error).message}`);
@@ -591,14 +750,17 @@ async function main() {
         await setProgress(writable, runId, label, {
           scraped_count: list.length, done_rooms: rooms.length, status: "done",
         });
-      console.log(
-        `[scrape] ${label}: ${bWritten} changed/new, ${list.length - bWritten} unchanged (total written ${written}).`
-      );
+      await flushChanges(); // commit this section's change log immediately
+      console.log(`[scrape] ${label}: ${bWritten} changed/new, ${list.length - bWritten} unchanged.`);
     }
 
+    // --- soft-delete pass (after all crawled sections) -----------------------
+    if (writable) await reconcileRemovals(writable, crawledLabels, seenPks, sectionHealth, existing, logChange);
+    await flushChanges();
+
     console.log(
-      `[scrape] parsed ${totalCourses} courses / ${totalSessions} sessions ` +
-        `from ${requests} requests (${written} changed, ${unchanged} unchanged, ${skipped.length} skipped).`
+      `[scrape] parsed ${totalCourses} courses from ${requests} requests ` +
+        `(${written} changed/new, ${unchanged} unchanged, ${skipped.length} skipped).`
     );
 
     if (!writable) {
@@ -607,8 +769,7 @@ async function main() {
         const s = [...c.sessions.values()][0];
         console.log(
           `   · [${c.pk}] ${c.course_name} ${c.teacher ?? ""} ` +
-            `@${s?.classroom ?? "?"} wd${s?.weekday ?? "?"} ` +
-            `節次${s?.periods.join(",") || "?"}  (${c.sessions.size} session(s))`
+            `@${s?.classroom ?? "?"} wd${s?.weekday ?? "?"} 節次${s?.periods.join(",") || "?"}`
         );
       }
       return;
@@ -632,16 +793,64 @@ async function main() {
     if (writable && runId) {
       await writable
         .from("scrape_runs")
-        .update({
-          finished_at: new Date().toISOString(),
-          status: "error",
-          error_message: message.slice(0, 1000),
-        })
+        .update({ finished_at: new Date().toISOString(), status: "error", error_message: message.slice(0, 1000) })
         .eq("id", runId);
     }
     process.exitCode = 1;
   } finally {
     if (browser) await browser.close();
+  }
+}
+
+/**
+ * Soft-delete courses that vanished from the crawled section(s). Scoped per
+ * section label; never touches NTUST rows (their building label is never a
+ * crawled NTU section). Guards: skip a section that errored, had 0 rooms, or
+ * where >50% of its courses went missing (a likely source glitch) — and log it.
+ */
+async function reconcileRemovals(
+  supabase: SupabaseClient,
+  crawledLabels: string[],
+  seenPks: Set<string>,
+  sectionHealth: Map<string, { rooms: number; errored: boolean }>,
+  existing: Map<string, ExistingCourse>,
+  logChange: (
+    type: string,
+    course: { pk: string | null; name: string | null; building: string | null; id?: string | null },
+    detail: Record<string, unknown> | null
+  ) => void
+) {
+  const now = new Date().toISOString();
+  for (const label of crawledLabels) {
+    const health = sectionHealth.get(label);
+    const candidates: { pk: string; e: ExistingCourse }[] = [];
+    let totalActive = 0;
+    for (const [pk, e] of existing) {
+      if ((e.building ?? "") !== label || e.status !== "active") continue;
+      totalActive++;
+      if (!seenPks.has(pk)) candidates.push({ pk, e });
+    }
+    if (!health || health.errored || health.rooms === 0) {
+      logChange("removal_skipped", { pk: null, name: null, building: label }, { reason: health?.errored ? "errored" : "no_rooms" });
+      continue;
+    }
+    if (totalActive > 0 && candidates.length > totalActive * 0.5) {
+      logChange("removal_skipped", { pk: null, name: null, building: label }, { reason: "too_many", missing: candidates.length, total: totalActive });
+      console.warn(`[scrape] ${label}: removal skipped — ${candidates.length}/${totalActive} missing (>50%).`);
+      continue;
+    }
+    if (candidates.length === 0) continue;
+    const ids = candidates.map((c) => c.e.id);
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const { error } = await supabase.from("courses").update({ status: "removed", removed_at: now }).in("id", chunk);
+      if (error) { console.warn(`[scrape] soft-delete failed: ${error.message}`); continue; }
+    }
+    for (const c of candidates) {
+      c.e.status = "removed";
+      logChange("removed", { pk: c.pk, name: c.e.name, building: label, id: c.e.id }, null);
+    }
+    console.log(`[scrape] ${label}: soft-deleted ${candidates.length} course(s).`);
   }
 }
 

@@ -259,6 +259,40 @@ drop policy if exists "course_requirements_select_public" on public.course_requi
 create policy "course_requirements_select_public"
   on public.course_requirements for select using (true);
 
+-- ============================ 5c. SCRAPE REVAMP (see 11_scrape_revamp.sql) ===
+-- soft-delete (停開), per-section scrape, change log.
+alter table public.courses
+  add column if not exists status text not null default 'active';
+alter table public.courses
+  add column if not exists removed_at timestamptz;
+create index if not exists idx_courses_status on public.courses(status) where status = 'removed';
+
+alter table public.scrape_runs
+  add column if not exists section text;
+
+create table if not exists public.scrape_buildings (
+  value      text primary key,
+  label      text not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.scrape_buildings enable row level security;
+
+create table if not exists public.course_changes (
+  id                  uuid primary key default gen_random_uuid(),
+  run_id              uuid,
+  course_id           uuid,
+  course_pk           text,
+  course_name         text,
+  building_or_college text,
+  change_type         text not null,
+  detail              jsonb,
+  changed_on          date not null,
+  created_at          timestamptz not null default now()
+);
+create index if not exists idx_course_changes_day on public.course_changes(changed_on desc);
+create index if not exists idx_course_changes_run on public.course_changes(run_id);
+alter table public.course_changes enable row level security;
+
 -- ============================ 6. SAMPLE SEED (FAKE) ==========================
 -- Optional. Dummy data for local front-end development only. Delete this block
 -- if you only want the schema. user_timetables / timetable_courses are NOT

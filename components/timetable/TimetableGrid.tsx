@@ -93,13 +93,14 @@ export function TimetableGrid({
                               }
                               onMouseEnter={() => setHoveredId(c.id)}
                               onMouseLeave={() => setHoveredId(null)}
-                              title={c.course_name}
+                              title={c.status === "removed" ? `${c.course_name}（已停開）` : c.course_name}
                               className={cn(
                                 "w-full rounded-sm p-1 text-left transition-colors",
                                 c.id === hoveredId
                                   ? "bg-foreground/20 text-foreground"
                                   : "bg-muted",
-                                c.id === selectedId && "ring-2 ring-foreground/40"
+                                c.id === selectedId && "ring-2 ring-foreground/40",
+                                c.status === "removed" && "text-muted-foreground line-through opacity-70"
                               )}
                             >
                               <span className="block truncate font-sans text-[11px]">
@@ -126,6 +127,11 @@ export function TimetableGrid({
               {/* 標題行：課名 + 流水號（班次）。 */}
               <p className="text-sm font-bold">
                 {selectedCourse.course_name}
+                {selectedCourse.status === "removed" && (
+                  <span className="ml-2 rounded-sm bg-[hsl(var(--warning))]/15 px-1.5 py-0.5 text-[11px] font-medium text-[hsl(var(--warning))]">
+                    已停開
+                  </span>
+                )}
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
                   {[
                     selectedCourse.pk && `流水號 ${selectedCourse.pk}`,

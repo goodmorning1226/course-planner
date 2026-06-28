@@ -37,6 +37,9 @@ const SLUGS = process.env.NTU_CATEGORIES
   : undefined;
 const ONLY_NEW =
   process.env.ENRICH_ONLY_NEW === "1" || process.env.ENRICH_ONLY_NEW === "true";
+// Scope to ONE section (building label) — used by the per-section admin scrape so
+// a section's bar only goes green after ITS new courses are classified.
+const ONLY_BUILDING = process.env.ENRICH_BUILDING?.trim() || null;
 const SKIP_GRADES =
   process.env.ENRICH_SKIP_GRADES === "1" || process.env.ENRICH_SKIP_GRADES === "true";
 // FORCE bypasses the don't-downgrade safeguard — re-derives every course from
@@ -133,11 +136,13 @@ function makeServiceClient(): SupabaseClient | null {
 async function readAllCourses(supabase: SupabaseClient): Promise<CourseRow[]> {
   const all: CourseRow[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("courses")
       .select("id, pk, course_name")
       .order("id", { ascending: true })
       .range(from, from + 999);
+    if (ONLY_BUILDING) query = query.eq("building_or_college", ONLY_BUILDING);
+    const { data, error } = await query;
     if (error) throw error;
     const rows = (data ?? []) as CourseRow[];
     all.push(...rows);
@@ -424,6 +429,7 @@ async function main() {
   console.log(`[enrich] catalog: ${catalog.size} distinct course keys.`);
 
   let courses = await readAllCourses(supabase);
+  if (ONLY_BUILDING) console.log(`[enrich] ENRICH_BUILDING=${ONLY_BUILDING}: ${courses.length} courses in scope.`);
   if (ONLY_NEW) {
     const have = new Set<string>();
     for (let from = 0; ; from += 1000) {

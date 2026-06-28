@@ -51,9 +51,15 @@ export function TimetableView({ userEmail }: { userEmail: string | null }) {
   }, [loggedIn, fetchCloud]);
 
   const courses = loggedIn ? cloud : local.courses;
+  // 停開 (soft-deleted) courses are kept visible (struck-through) but can't be
+  // taken, so they're excluded from the credit total.
+  const removedCount = courses.filter((c) => c.status === "removed").length;
+  const activeCourses = removedCount
+    ? courses.filter((c) => c.status !== "removed")
+    : courses;
   // "最多可選學分": conflicting courses can't both be taken, so this is the
   // max-weight independent set over the conflict graph (weight = credits).
-  const totalCredits = maxSelectableCredits(courses);
+  const totalCredits = maxSelectableCredits(activeCourses);
 
   // Remove: cloud (DELETE) or local depending on auth.
   const removeCloud = useCallback(
@@ -176,6 +182,13 @@ export function TimetableView({ userEmail }: { userEmail: string | null }) {
         <EmptyState />
       ) : (
         <>
+          {removedCount > 0 && (
+            <Card className="border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/5 p-3 text-sm">
+              有 {removedCount} 門課已<span className="font-medium text-[hsl(var(--warning))]">停開</span>
+              （課表中以刪除線標示，不計入學分）。如不需要可移除。
+            </Card>
+          )}
+
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
             <span>已加入 {courses.length} 門課・最多 {totalCredits} 學分</span>
 

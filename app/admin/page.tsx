@@ -28,7 +28,7 @@ export default async function AdminPage() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">管理後台</h1>
         <p className="text-sm text-muted-foreground">
-          {admin.email}｜資料指標與一鍵重新爬取
+          {admin.email}｜資料指標、重新爬取與變動日誌
         </p>
       </header>
       <AdminDashboard />

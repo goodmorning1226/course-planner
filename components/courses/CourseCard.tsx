@@ -6,7 +6,7 @@ import type {
 } from "@/lib/courses/types";
 import { Card, Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { weekdayLabel } from "@/lib/utils";
+import { cn, weekdayLabel } from "@/lib/utils";
 import { formatPeriods } from "@/lib/courses/periods";
 import { CourseClassification } from "./CourseClassification";
 
@@ -27,15 +27,25 @@ export function CourseCard({
     course.teacher && `教師 ${course.teacher}`,
     course.building_or_college && `建物/學院 ${course.building_or_college}`,
   ].filter(Boolean) as string[];
+  const removed = course.status === "removed";
 
   return (
-    <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+    <Card className={cn(
+      "flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between",
+      removed && "opacity-75"
+    )}>
       <div className="min-w-0 space-y-2">
         {/* Primary: course name */}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h3 className="text-base font-semibold leading-snug">
+          <h3 className={cn(
+            "text-base font-semibold leading-snug",
+            removed && "text-muted-foreground line-through"
+          )}>
             {course.course_name}
           </h3>
+          {removed && (
+            <Badge className="bg-[hsl(var(--warning))]/15 text-[hsl(var(--warning))]">停開</Badge>
+          )}
           {course.pk && <Badge>流水號 {course.pk}</Badge>}
           {course.class_group && <Badge>班次 {course.class_group}</Badge>}
         </div>
@@ -85,6 +95,8 @@ export function CourseCard({
               移除
             </Button>
           </>
+        ) : removed ? (
+          <span className="text-xs font-medium text-muted-foreground">已停開</span>
         ) : (
           <Button
             size="sm"

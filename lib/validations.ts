@@ -62,10 +62,28 @@ export const courseSearchQuerySchema = z.object({
   requirement: z.enum(REQUIREMENT_VALUES).optional(),
   classificationSource: z.enum(SOURCE_VALUES).optional(),
   classificationConfidence: z.enum(["high", "medium", "low", "unknown"]).optional(),
+  // Soft-delete: hide 停開 (status='removed') courses. Default shows them, marked.
+  hideRemoved: z.enum(["true", "false"]).optional(),
   cursor: cursorSchema.optional(),
   limit: z.coerce.number().int().min(1).max(50).default(30),
 });
 export type CourseSearchQuery = z.infer<typeof courseSearchQuerySchema>;
+
+/**
+ * Body for POST /api/admin/scrape — pick which section to (re-)scrape:
+ *   'all'    full crawl (every building + 其他) + classify new
+ *   'ntust'  台科 校際 live-API refresh
+ *   '%'      其他 (orphan rooms)
+ *   <value>  a single BuildingDDL value (e.g. '1')
+ */
+export const scrapeSectionBodySchema = z.object({
+  section: z
+    .string()
+    .trim()
+    .regex(/^(all|ntust|%|[A-Za-z0-9]{1,16})$/, "section 不合法")
+    .default("all"),
+});
+export type ScrapeSectionBody = z.infer<typeof scrapeSectionBodySchema>;
 
 /**
  * Body for POST / DELETE /api/timetable/courses. The caller only supplies the

@@ -27,9 +27,10 @@ export async function GET() {
     const nowTw = tw(Date.now());
     const today = nowTw.slice(0, 10);
 
-    const [courses, tcRows, classified, ge, timetables, pv, lastRun, users, anon, pvDays, pvHours] =
+    const [courses, removed, tcRows, classified, ge, timetables, pv, lastRun, users, anon, pvDays, pvHours] =
       await Promise.all([
-        db.from("courses").select("*", head),
+        db.from("courses").select("*", head).eq("status", "active"),
+        db.from("courses").select("*", head).eq("status", "removed"),
         db.from("timetable_courses").select("timetable_id"),
         db.from("course_metadata").select("*", head),
         db.from("course_metadata").select("*", head).eq("is_general_education", true),
@@ -98,6 +99,7 @@ export async function GET() {
 
     return NextResponse.json({
       courses: courses.count ?? 0,
+      coursesRemoved: removed.count ?? 0,
       classified: classified.count ?? 0,
       generalEducation: ge.count ?? 0,
       timetableEntries: timetables.count ?? 0,

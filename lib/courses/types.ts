@@ -51,6 +51,11 @@ export interface Course {
   /** 校際課程：開放台大名額 / 已選台大人數 (null = 一般台大課程). */
   interschool_quota?: number | null;
   interschool_taken?: number | null;
+  /** 'active' | 'removed'(停開). Soft-delete: a course that vanished from source
+   *  is flagged 'removed' (shown struck-through), never hard-deleted. */
+  status?: "active" | "removed";
+  /** 停開時間 (ISO string) — null while active. */
+  removed_at?: string | null;
   created_at: string;
   updated_at: string;
 }
