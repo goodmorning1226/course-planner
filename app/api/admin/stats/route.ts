@@ -26,8 +26,9 @@ export async function GET() {
     const head = { count: "exact" as const, head: true };
     const nowTw = tw(Date.now());
     const today = nowTw.slice(0, 10);
+    const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString();
 
-    const [courses, removed, tcRows, classified, ge, timetables, pv, lastRun, users, anon, pvDays, pvHours] =
+    const [courses, removed, tcRows, classified, ge, timetables, pv, lastRun, users, anon, pvDays, pvHours, activeNowR, activeDays, activeHours] =
       await Promise.all([
         db.from("courses").select("*", head).eq("status", "active"),
         db.from("courses").select("*", head).eq("status", "removed"),
@@ -42,6 +43,10 @@ export async function GET() {
         db.from("timetable_activity").select("*", head).gt("course_count", 0),
         db.from("site_stats").select("key, count").like("key", "pv:%"),
         db.from("site_stats").select("key, count").like("key", `pvh:${today}T%`),
+        // 活躍人數: distinct clients seen in the last 5 min, + per-day / per-hour buckets.
+        db.from("active_sessions").select("*", head).gte("last_seen", fiveMinAgo),
+        db.from("site_stats").select("key, count").like("key", "active:d:%"),
+        db.from("site_stats").select("key, count").like("key", `active:h:${today}T%`),
       ]);
 
     // 已排課人數 = registered (distinct timetable) + anonymous (localStorage)
@@ -52,25 +57,23 @@ export async function GET() {
 
     // --- time-series -------------------------------------------------------
     const userList = users.data?.users ?? [];
-    // 使用者: cumulative total by day (all-time) and by hour (today)
+    // 使用者: cumulative total by day (all-time) and NEW per hour (today).
     const byDay = new Map<string, number>();
-    let beforeToday = 0;
     const hourNew = new Map<number, number>();
     for (const u of userList) {
       if (!u.created_at) continue;
       const t = tw(u.created_at);
       const d = t.slice(0, 10);
       byDay.set(d, (byDay.get(d) ?? 0) + 1);
-      if (d < today) beforeToday++;
-      else if (d === today) { const h = Number(t.slice(11, 13)); hourNew.set(h, (hourNew.get(h) ?? 0) + 1); }
+      if (d === today) { const h = Number(t.slice(11, 13)); hourNew.set(h, (hourNew.get(h) ?? 0) + 1); }
     }
     const usersAllTime: Point[] = [];
     let cum = 0;
     for (const d of [...byDay.keys()].sort()) { cum += byDay.get(d)!; usersAllTime.push({ label: d, value: cum }); }
     const curHour = Number(nowTw.slice(11, 13));
+    // Per-hour new signups today (same shape as 瀏覽數 今日每小時).
     const usersToday: Point[] = [];
-    let c2 = beforeToday;
-    for (let h = 0; h <= curHour; h++) { c2 += hourNew.get(h) ?? 0; usersToday.push({ label: `${String(h).padStart(2, "0")}:00`, value: c2 }); }
+    for (let h = 0; h <= curHour; h++) usersToday.push({ label: `${String(h).padStart(2, "0")}:00`, value: hourNew.get(h) ?? 0 });
 
     // 瀏覽數: cumulative TOTAL over time. We only have per-day buckets since
     // stats collection started; all earlier views are one lump in the
@@ -97,6 +100,19 @@ export async function GET() {
     const pvToday: Point[] = [];
     for (let h = 0; h <= curHour; h++) pvToday.push({ label: `${String(h).padStart(2, "0")}:00`, value: pvHourMap.get(h) ?? 0 });
 
+    // 活躍人數: distinct active per day (history) + per hour today. Keys are
+    // "active:d:YYYY-MM-DD" (day = slice(9)) and "active:h:…THH" (hour = last 2).
+    const activeNow = activeNowR.count ?? 0;
+    const activeDaily = withStart(
+      ((activeDays.data ?? []) as { key: string; count: number }[])
+        .map((r) => ({ label: r.key.slice(9), value: Number(r.count) }))
+        .sort((a, b) => a.label.localeCompare(b.label))
+    );
+    const activeHourMap = new Map<number, number>();
+    for (const r of (activeHours.data ?? []) as { key: string; count: number }[]) activeHourMap.set(Number(r.key.slice(-2)), Number(r.count));
+    const activeToday: Point[] = [];
+    for (let h = 0; h <= curHour; h++) activeToday.push({ label: `${String(h).padStart(2, "0")}:00`, value: activeHourMap.get(h) ?? 0 });
+
     return NextResponse.json({
       courses: courses.count ?? 0,
       coursesRemoved: removed.count ?? 0,
@@ -106,12 +122,15 @@ export async function GET() {
       pageViews: Number(pv.data?.count ?? 0),
       users: userList.length,
       usersWithCourses,
+      activeNow,
       lastScrape: lastRun.data ?? null,
       series: {
         usersAllTime: withStart(usersAllTime),
         usersToday,
         pvAllTime,
         pvToday,
+        activeDaily,
+        activeToday,
       },
     });
   } catch (err) {

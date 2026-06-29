@@ -5,6 +5,7 @@ import { FooterNotice } from "@/components/layout/FooterNotice";
 import { DisclaimerDialog } from "@/components/disclaimer/DisclaimerDialog";
 import { BackToTop } from "@/components/layout/BackToTop";
 import { PageViewTracker } from "@/components/PageViewTracker";
+import { Heartbeat } from "@/components/Heartbeat";
 
 export const metadata: Metadata = {
   // Fixed tab title on every page — child pages intentionally don't override it.
@@ -30,6 +31,7 @@ export default function RootLayout({
         <DisclaimerDialog />
         <BackToTop />
         <PageViewTracker />
+        <Heartbeat />
       </body>
     </html>
   );

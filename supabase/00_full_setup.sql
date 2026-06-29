@@ -356,6 +356,21 @@ alter table public.grade_distributions enable row level security;
 drop policy if exists "grade_distributions_select_public" on public.grade_distributions;
 create policy "grade_distributions_select_public" on public.grade_distributions for select using (true);
 
+-- ============================ 5e. PRESENCE (see 13_presence.sql) =============
+create table if not exists public.active_sessions (
+  client_id text primary key,
+  last_seen  timestamptz not null default now()
+);
+create index if not exists idx_active_sessions_seen on public.active_sessions(last_seen);
+alter table public.active_sessions enable row level security;
+
+create table if not exists public.presence (
+  bucket    text not null,
+  client_id text not null,
+  primary key (bucket, client_id)
+);
+alter table public.presence enable row level security;
+
 -- ============================ 6. SAMPLE SEED (FAKE) ==========================
 -- Optional. Dummy data for local front-end development only. Delete this block
 -- if you only want the schema. user_timetables / timetable_courses are NOT

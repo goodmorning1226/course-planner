@@ -6,8 +6,11 @@ import { Card } from "@/components/ui/card";
 export type Point = { label: string; value: number };
 
 // Minimal dependency-free SVG line chart for the admin dashboard.
+// Points are clickable: tap/click pins that day's value in the header (works on
+// touch, where hover doesn't); click again to unpin.
 export function LineChart({ title, data }: { title: string; data: Point[] }) {
   const [hover, setHover] = useState<number | null>(null);
+  const [pinned, setPinned] = useState<number | null>(null);
   const W = 360, H = 140, padX = 8, padY = 14;
   const n = data.length;
   const max = Math.max(1, ...data.map((d) => d.value));
@@ -16,7 +19,8 @@ export function LineChart({ title, data }: { title: string; data: Point[] }) {
   const line = data.map((d, i) => `${x(i)},${y(d.value)}`).join(" ");
   const area = n ? `${x(0)},${H - padY} ${line} ${x(n - 1)},${H - padY}` : "";
   const last = data[n - 1];
-  const cur = hover != null ? data[hover] : last;
+  const sel = pinned ?? hover;
+  const cur = sel != null ? data[sel] : last;
 
   return (
     <Card className="space-y-2 p-4">
@@ -27,6 +31,7 @@ export function LineChart({ title, data }: { title: string; data: Point[] }) {
             <span className="font-semibold text-foreground">{cur.value.toLocaleString()}</span>
             {" "}
             {cur.label}
+            {pinned != null && <span className="ml-1 text-[10px]">📌</span>}
           </p>
         )}
       </div>
@@ -39,14 +44,15 @@ export function LineChart({ title, data }: { title: string; data: Point[] }) {
           <polyline points={line} fill="none" stroke="hsl(var(--foreground))" strokeWidth="1.5"
             strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
           {data.map((d, i) => (
-            <circle key={i} cx={x(i)} cy={y(d.value)} r={hover === i ? 3 : 0}
+            <circle key={i} cx={x(i)} cy={y(d.value)} r={hover === i || pinned === i ? 3 : 0}
               fill="hsl(var(--foreground))" />
           ))}
-          {/* invisible hover targets */}
+          {/* invisible hover / click targets */}
           {data.map((d, i) => (
             <rect key={`h${i}`} x={x(i) - (W / Math.max(n, 1)) / 2} y={0}
-              width={W / Math.max(n, 1)} height={H} fill="transparent"
-              onMouseEnter={() => setHover(i)} />
+              width={W / Math.max(n, 1)} height={H} fill="transparent" className="cursor-pointer"
+              onMouseEnter={() => setHover(i)}
+              onClick={() => setPinned((p) => (p === i ? null : i))} />
           ))}
         </svg>
       )}
