@@ -38,10 +38,36 @@ export function CourseInfo({
   loggedIn: boolean;
 }) {
   const [tab, setTab] = useState<"reviews" | "grades">("reviews");
+  // Per-tab counts for the labels. Seeded by one counts request, then kept in
+  // sync by each tab as it loads / mutates its own data.
+  const [reviewCount, setReviewCount] = useState<number | null>(null);
+  const [gradeCount, setGradeCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/course-info/counts?${qs(courseName, teacher)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!active || !j) return;
+        setReviewCount(j.reviews ?? 0);
+        setGradeCount(j.grades ?? 0);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [courseName, teacher]);
+
+  const count = (n: number | null) => (n != null ? `（${n}）` : "");
+  const tabs = [
+    ["reviews", `課程評價${count(reviewCount)}`],
+    ["grades", `成績分布${count(gradeCount)}`],
+  ] as const;
+
   return (
     <div className="space-y-4">
       <div className="flex gap-1">
-        {([["reviews", "課程評價"], ["grades", "成績分布"]] as const).map(([k, label]) => (
+        {tabs.map(([k, label]) => (
           <button
             key={k}
             type="button"
@@ -56,9 +82,9 @@ export function CourseInfo({
         ))}
       </div>
       {tab === "reviews" ? (
-        <ReviewsTab courseName={courseName} teacher={teacher} loggedIn={loggedIn} />
+        <ReviewsTab courseName={courseName} teacher={teacher} loggedIn={loggedIn} onCount={setReviewCount} />
       ) : (
-        <GradesTab courseName={courseName} teacher={teacher} loggedIn={loggedIn} />
+        <GradesTab courseName={courseName} teacher={teacher} loggedIn={loggedIn} onCount={setGradeCount} />
       )}
     </div>
   );
@@ -67,13 +93,13 @@ export function CourseInfo({
 // ---------------------------------------------------------------------------
 // 課程評價
 // ---------------------------------------------------------------------------
-function ReviewsTab({ courseName, teacher, loggedIn }: { courseName: string; teacher: string | null; loggedIn: boolean }) {
+function ReviewsTab({ courseName, teacher, loggedIn, onCount }: { courseName: string; teacher: string | null; loggedIn: boolean; onCount: (n: number) => void }) {
   const [aggregate, setAggregate] = useState<ReviewAggregate | null>(null);
   const [reviews, setReviews] = useState<CourseReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
-  // null = no form; otherwise add a new review or edit an existing one.
-  const [form, setForm] = useState<{ mode: "add" } | { mode: "edit"; review: CourseReview } | null>(null);
+  // null = closed; object = open (optional initial semester from a row's pencil).
+  const [form, setForm] = useState<{ initial?: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,20 +108,17 @@ function ReviewsTab({ courseName, teacher, loggedIn }: { courseName: string; tea
       const j = await r.json();
       setAggregate(j.aggregate ?? null);
       setReviews(j.reviews ?? []);
+      onCount(j.aggregate?.count ?? j.reviews?.length ?? 0);
     } catch {
       setNotice("載入評價失敗。");
     } finally {
       setLoading(false);
     }
-  }, [courseName, teacher]);
+  }, [courseName, teacher, onCount]);
 
   useEffect(() => {
     load();
   }, [load]);
-
-  // Semesters the user hasn't reviewed yet (for the 新增評論 picker).
-  const reviewedSemesters = useMemo(() => new Set(reviews.filter((r) => r.mine).map((r) => r.semester)), [reviews]);
-  const available = useMemo(() => SEMESTER_OPTIONS.filter((s) => !reviewedSemesters.has(s)), [reviewedSemesters]);
 
   async function toggleLike(rv: CourseReview) {
     if (!loggedIn) return setNotice("登入後才能按讚。");
@@ -146,24 +169,21 @@ function ReviewsTab({ courseName, teacher, loggedIn }: { courseName: string; tea
 
       {loading && <p className="text-sm text-muted-foreground">載入中…</p>}
 
-      {/* 新增評論 按鈕（左上）/ 表單 */}
+      {/* 新增／編輯評論 按鈕（左上）/ 表單 */}
       {loggedIn ? (
         form ? (
           <ReviewForm
             courseName={courseName}
             teacher={teacher}
-            mode={form.mode}
-            review={form.mode === "edit" ? form.review : undefined}
-            available={available}
+            reviews={reviews}
+            initialSemester={form.initial}
             onClose={() => setForm(null)}
             onSaved={() => { setForm(null); load(); }}
           />
-        ) : available.length > 0 ? (
-          <Button size="sm" variant="outline" onClick={() => setForm({ mode: "add" })}>
-            ＋ 新增評論
-          </Button>
         ) : (
-          <p className="text-xs text-muted-foreground">你已評價過所有可選學期。</p>
+          <Button size="sm" variant="outline" onClick={() => setForm({})}>
+            新增／編輯評論
+          </Button>
         )
       ) : (
         <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
@@ -189,7 +209,7 @@ function ReviewsTab({ courseName, teacher, loggedIn }: { courseName: string; tea
                 {rv.mine && (
                   <button
                     type="button"
-                    onClick={() => setForm({ mode: "edit", review: rv })}
+                    onClick={() => setForm({ initial: rv.semester })}
                     aria-label="編輯評論"
                     title="編輯"
                     className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -222,34 +242,47 @@ function ReviewsTab({ courseName, teacher, loggedIn }: { courseName: string; tea
   );
 }
 
+const emptyRatings = (): Record<AxisKey, number> => ({ overall: 0, sweet: 0, chill: 0, solid: 0 });
+const fillRatings = (r?: CourseReview): Record<AxisKey, number> =>
+  r ? { overall: r.rating_overall, sweet: r.rating_sweet, chill: r.rating_chill, solid: r.rating_solid } : emptyRatings();
+const defaultReviewSemester = (mineBySem: Map<string, CourseReview>) =>
+  SEMESTER_OPTIONS.find((s) => !mineBySem.has(s)) ?? SEMESTER_OPTIONS[0];
+
+// One form for add + edit. Pick any semester: one you've already reviewed loads
+// its values for editing; a new one starts blank. Either way submits via upsert.
 function ReviewForm({
   courseName,
   teacher,
-  mode,
-  review,
-  available,
+  reviews,
+  initialSemester,
   onClose,
   onSaved,
 }: {
   courseName: string;
   teacher: string | null;
-  mode: "add" | "edit";
-  review?: CourseReview;
-  available: string[];
+  reviews: CourseReview[];
+  initialSemester?: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const isEdit = mode === "edit" && !!review;
-  const [semester, setSemester] = useState(isEdit ? review!.semester : available[0] ?? "");
-  const [ratings, setRatings] = useState<Record<AxisKey, number>>(
-    isEdit
-      ? { overall: review!.rating_overall, sweet: review!.rating_sweet, chill: review!.rating_chill, solid: review!.rating_solid }
-      : { overall: 0, sweet: 0, chill: 0, solid: 0 }
+  const mineBySem = useMemo(
+    () => new Map(reviews.filter((r) => r.mine).map((r) => [r.semester, r])),
+    [reviews]
   );
-  const [comment, setComment] = useState(isEdit ? review!.comment ?? "" : "");
+  const [semester, setSemester] = useState(initialSemester ?? defaultReviewSemester(mineBySem));
+  const [ratings, setRatings] = useState<Record<AxisKey, number>>(() => fillRatings(mineBySem.get(semester)));
+  const [comment, setComment] = useState(mineBySem.get(semester)?.comment ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Switching semester loads that semester's own review (or blanks).
+  useEffect(() => {
+    const mine = mineBySem.get(semester);
+    setRatings(fillRatings(mine));
+    setComment(mine?.comment ?? "");
+  }, [semester, mineBySem]);
+
+  const editing = mineBySem.has(semester);
   const ready = AXES.every((a) => ratings[a.key] >= 0.5);
 
   async function submit() {
@@ -275,14 +308,15 @@ function ReviewForm({
   }
 
   async function remove() {
-    if (!review) return;
+    const mine = mineBySem.get(semester);
+    if (!mine) return;
     if (!window.confirm("確定要刪除這則評論嗎？")) return;
     setSaving(true);
     try {
       const r = await fetch("/api/reviews", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewId: review.id }),
+        body: JSON.stringify({ reviewId: mine.id }),
       });
       if (!r.ok) throw new Error();
       onSaved();
@@ -295,7 +329,7 @@ function ReviewForm({
   return (
     <div className="space-y-3 rounded-lg border border-border p-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">{isEdit ? "編輯評論" : "新增評論"}</span>
+        <span className="text-sm font-medium">新增／編輯評論</span>
         <button
           type="button"
           onClick={onClose}
@@ -308,15 +342,15 @@ function ReviewForm({
       </div>
       <div className="flex items-center gap-2 text-sm">
         <span className="text-muted-foreground">修課學期</span>
-        {isEdit ? (
-          <span className="rounded bg-muted px-2 py-1 text-xs">{semester}</span>
-        ) : (
-          <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
-            {available.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </Select>
-        )}
+        <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
+          {SEMESTER_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {s}
+              {mineBySem.has(s) ? "（已評）" : ""}
+            </option>
+          ))}
+        </Select>
+        {editing && <span className="text-xs text-muted-foreground">編輯既有</span>}
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {AXES.map((a) => (
@@ -328,16 +362,16 @@ function ReviewForm({
       </div>
       <Textarea placeholder="留下你的修課心得（選填）" value={comment} onChange={(e) => setComment(e.target.value)} maxLength={500} />
       {err && <p className="text-sm text-[hsl(var(--warning))]">{err}</p>}
-      <div className="flex items-center gap-2">
-        <Button size="sm" onClick={submit} disabled={saving || !semester}>
-          {saving ? "儲存中…" : isEdit ? "更新評論" : "送出評論"}
-        </Button>
-        <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>取消</Button>
-        {isEdit && (
-          <Button size="sm" variant="ghost" onClick={remove} disabled={saving} className="ml-auto text-red-600">
+      <div className="flex justify-end gap-2">
+        {editing && (
+          <Button size="sm" variant="ghost" onClick={remove} disabled={saving} className="text-red-600">
             刪除
           </Button>
         )}
+        <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>取消</Button>
+        <Button size="sm" onClick={submit} disabled={saving || !semester}>
+          {saving ? "儲存中…" : editing ? "更新" : "送出"}
+        </Button>
       </div>
     </div>
   );
@@ -367,29 +401,38 @@ function PencilIcon({ className }: { className?: string }) {
 // ---------------------------------------------------------------------------
 // 成績分布
 // ---------------------------------------------------------------------------
-function GradesTab({ courseName, teacher, loggedIn }: { courseName: string; teacher: string | null; loggedIn: boolean }) {
+function GradesTab({
+  courseName,
+  teacher,
+  loggedIn,
+  onCount,
+}: {
+  courseName: string;
+  teacher: string | null;
+  loggedIn: boolean;
+  onCount: (n: number) => void;
+}) {
   const [dists, setDists] = useState<GradeDistribution[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  // null = closed; object = open (optional initial semester from a row's pencil).
+  const [form, setForm] = useState<{ initial?: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const r = await fetch(`/api/grades?${qs(courseName, teacher)}`);
       const j = await r.json();
-      setDists(j.distributions ?? []);
+      const list = j.distributions ?? [];
+      setDists(list);
+      onCount(list.length);
     } finally {
       setLoading(false);
     }
-  }, [courseName, teacher]);
+  }, [courseName, teacher, onCount]);
 
   useEffect(() => {
     load();
   }, [load]);
-
-  // 已存在的學期不可再新增（避免覆蓋）。
-  const existingSemesters = useMemo(() => new Set(dists.map((d) => d.semester)), [dists]);
-  const available = useMemo(() => SEMESTER_OPTIONS.filter((s) => !existingSemesters.has(s)), [existingSemesters]);
 
   return (
     <div className="space-y-4">
@@ -401,16 +444,26 @@ function GradesTab({ courseName, teacher, loggedIn }: { courseName: string; teac
         <div className="space-y-4">
           {dists.map((d) => (
             <div key={d.id} className="space-y-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between gap-2">
                 <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{d.semester}</span>
-                {d.note && <span className="text-xs text-muted-foreground">{d.note}</span>}
+                {loggedIn && (
+                  <button
+                    type="button"
+                    onClick={() => setForm({ initial: d.semester })}
+                    aria-label="編輯成績分布"
+                    title="編輯"
+                    className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <PencilIcon className="h-4 w-4" />
+                  </button>
+                )}
               </div>
               <div className="space-y-1">
                 {GRADE_BUCKETS.map((b) => {
                   const v = d[b.key] as number | null;
                   return (
                     <div key={b.key as string} className="flex items-center gap-2 text-xs">
-                      <span className="w-7 shrink-0 text-right tabular-nums text-muted-foreground">{b.label}</span>
+                      <span className="w-7 shrink-0 pl-1.5 text-left tabular-nums text-muted-foreground">{b.label}</span>
                       <div className="h-3 flex-1 overflow-hidden rounded-sm bg-muted">
                         <div className="h-full rounded-sm bg-foreground/70" style={{ width: `${Math.min(100, v ?? 0)}%` }} />
                       </div>
@@ -425,38 +478,89 @@ function GradesTab({ courseName, teacher, loggedIn }: { courseName: string; teac
       )}
 
       {loggedIn ? (
-        showForm ? (
-          <GradeForm courseName={courseName} teacher={teacher} available={available} onSaved={() => { setShowForm(false); load(); }} onCancel={() => setShowForm(false)} />
-        ) : available.length > 0 ? (
-          <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>＋ 新增成績分布</Button>
+        form ? (
+          <GradeForm
+            courseName={courseName}
+            teacher={teacher}
+            dists={dists}
+            initialSemester={form.initial}
+            onClose={() => setForm(null)}
+            onSaved={() => { setForm(null); load(); }}
+          />
         ) : (
-          !loading && <p className="text-xs text-muted-foreground">所有學期皆已有成績分布。</p>
+          <Button size="sm" variant="outline" onClick={() => setForm({})}>
+            新增／編輯成績分布
+          </Button>
         )
       ) : (
         <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
-          <Link href="/login" className="font-medium text-foreground underline">登入</Link> 後即可新增成績分布。
+          <Link href="/login" className="font-medium text-foreground underline">登入</Link> 後即可新增或編輯成績分布。
         </p>
       )}
     </div>
   );
 }
 
-function GradeForm({ courseName, teacher, available, onSaved, onCancel }: { courseName: string; teacher: string | null; available: string[]; onSaved: () => void; onCancel: () => void }) {
-  const [semester, setSemester] = useState(available[0] ?? "");
-  const [vals, setVals] = useState<Record<string, string>>({});
-  const [note, setNote] = useState("");
+const GRADE_FIELD: Record<string, string> = {
+  a_plus: "aPlus",
+  a: "a",
+  a_minus: "aMinus",
+  b_plus: "bPlus",
+  b: "b",
+  b_minus: "bMinus",
+  c_plus: "cPlus",
+  c: "c",
+  c_minus: "cMinus",
+  f: "f",
+};
+const defaultSemester = (dists: GradeDistribution[]) => {
+  const have = new Set(dists.map((d) => d.semester));
+  return SEMESTER_OPTIONS.find((s) => !have.has(s)) ?? SEMESTER_OPTIONS[0];
+};
+const fillFrom = (d?: GradeDistribution): Record<string, string> => {
+  if (!d) return {};
+  const init: Record<string, string> = {};
+  for (const b of GRADE_BUCKETS) {
+    const v = d[b.key] as number | null;
+    if (v != null) init[b.key as string] = String(v);
+  }
+  return init;
+};
+
+// One form for add + edit. Pick any semester: an existing one loads its values
+// and saves via PUT (edit); a new one saves via POST (add).
+function GradeForm({
+  courseName,
+  teacher,
+  dists,
+  initialSemester,
+  onClose,
+  onSaved,
+}: {
+  courseName: string;
+  teacher: string | null;
+  dists: GradeDistribution[];
+  initialSemester?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const bySem = useMemo(() => new Map(dists.map((d) => [d.semester, d])), [dists]);
+  const [semester, setSemester] = useState(initialSemester ?? defaultSemester(dists));
+  const [vals, setVals] = useState<Record<string, string>>(() => fillFrom(bySem.get(semester)));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const fieldMap: Record<string, string> = {
-    a_plus: "aPlus", a: "a", a_minus: "aMinus", b_plus: "bPlus", b: "b", b_minus: "bMinus",
-    c_plus: "cPlus", c: "c", c_minus: "cMinus", f: "f",
-  };
+  // Switching semester loads that semester's existing values (or blank).
+  useEffect(() => {
+    setVals(fillFrom(bySem.get(semester)));
+  }, [semester, bySem]);
+
+  const editing = bySem.has(semester);
 
   async function submit() {
     setErr(null);
     setSaving(true);
-    const buckets: Record<string, number | null> = {};
+    const out: Record<string, number | null> = {};
     for (const b of GRADE_BUCKETS) {
       const raw = vals[b.key as string];
       const n = raw != null && raw !== "" ? Number(raw) : null;
@@ -464,13 +568,13 @@ function GradeForm({ courseName, teacher, available, onSaved, onCancel }: { cour
         setSaving(false);
         return setErr(`${b.label} 需為 0–100 的百分比。`);
       }
-      buckets[fieldMap[b.key as string]] = n;
+      out[GRADE_FIELD[b.key as string]] = n;
     }
     try {
       const r = await fetch("/api/grades", {
-        method: "POST",
+        method: editing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ courseName, teacher, semester, ...buckets, note }),
+        body: JSON.stringify({ courseName, teacher, semester, ...out }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => null);
@@ -486,21 +590,41 @@ function GradeForm({ courseName, teacher, available, onSaved, onCancel }: { cour
 
   return (
     <div className="space-y-3 rounded-lg border border-border p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">新增／編輯成績分布</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="關閉"
+          title="關閉"
+          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          ✕
+        </button>
+      </div>
       <div className="flex items-center gap-2 text-sm">
         <span className="text-muted-foreground">學期</span>
         <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
-          {available.map((s) => (
-            <option key={s} value={s}>{s}</option>
+          {SEMESTER_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {s}
+              {bySem.has(s) ? "（已有）" : ""}
+            </option>
           ))}
         </Select>
-        <span className="text-xs text-muted-foreground">各級距填百分比（可留空）</span>
+        {editing && <span className="text-xs text-muted-foreground">編輯既有</span>}
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         {GRADE_BUCKETS.map((b) => (
           <label key={b.key as string} className="flex items-center gap-1 text-xs">
-            <span className="w-7 shrink-0 text-muted-foreground">{b.label}</span>
+            <span className="w-7 shrink-0 text-left text-muted-foreground">{b.label}</span>
             <Input
-              type="number" min={0} max={100} step="0.01" inputMode="decimal" placeholder="%"
+              type="number"
+              min={0}
+              max={100}
+              step="0.01"
+              inputMode="decimal"
+              placeholder="%"
               value={vals[b.key as string] ?? ""}
               onChange={(e) => setVals((v) => ({ ...v, [b.key as string]: e.target.value }))}
               className="h-8"
@@ -508,11 +632,12 @@ function GradeForm({ courseName, teacher, available, onSaved, onCancel }: { cour
           </label>
         ))}
       </div>
-      <Input placeholder="備註（選填）" value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} />
       {err && <p className="text-sm text-[hsl(var(--warning))]">{err}</p>}
-      <div className="flex gap-2">
-        <Button size="sm" onClick={submit} disabled={saving || !semester}>{saving ? "儲存中…" : "送出"}</Button>
-        <Button size="sm" variant="outline" onClick={onCancel}>取消</Button>
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>取消</Button>
+        <Button size="sm" onClick={submit} disabled={saving || !semester}>
+          {saving ? "儲存中…" : editing ? "更新" : "送出"}
+        </Button>
       </div>
     </div>
   );

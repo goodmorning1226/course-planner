@@ -3,6 +3,7 @@ import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/supab
 import { reviewBodySchema } from "@/lib/validations";
 import { courseInfoQuerySchema } from "@/lib/validations";
 import { matchKey } from "@/lib/reviews/key";
+import { logContent } from "@/lib/audit";
 import { rateLimit, clientKey, RATE_LIMITS } from "@/lib/rate-limit";
 import { apiError, rateLimited } from "@/lib/api-error";
 import type { CourseReview, ReviewAggregate } from "@/lib/courses/types";
@@ -98,13 +99,21 @@ export async function POST(req: Request) {
   const b = parsed.data;
 
   try {
+    const key = matchKey(b.courseName, b.teacher ?? null);
+    const { data: existing } = await supabase
+      .from("course_reviews")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("match_key", key)
+      .eq("semester", b.semester)
+      .maybeSingle();
     // RLS enforces auth.uid() = user_id; upsert keeps one row per course+semester.
     const { error } = await supabase.from("course_reviews").upsert(
       {
         user_id: user.id,
         course_name: b.courseName,
         teacher: b.teacher ?? null,
-        match_key: matchKey(b.courseName, b.teacher ?? null),
+        match_key: key,
         semester: b.semester,
         rating_overall: b.overall,
         rating_sweet: b.sweet,
@@ -115,6 +124,15 @@ export async function POST(req: Request) {
       { onConflict: "user_id,match_key,semester" }
     );
     if (error) throw error;
+    await logContent({
+      kind: "review",
+      action: existing ? "edit" : "add",
+      courseName: b.courseName,
+      teacher: b.teacher ?? null,
+      semester: b.semester,
+      userId: user.id,
+      detail: { overall: b.overall, sweet: b.sweet, chill: b.chill, solid: b.solid },
+    });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[/api/reviews POST] failed:", err);
@@ -135,8 +153,22 @@ export async function DELETE(req: Request) {
   if (!/^[0-9a-f-]{36}$/i.test(reviewId)) return apiError("invalid_request", "無效的評論 id。");
 
   try {
+    const { data: rv } = await supabase
+      .from("course_reviews")
+      .select("course_name, teacher, semester")
+      .eq("id", reviewId)
+      .maybeSingle();
     const { error } = await supabase.from("course_reviews").delete().eq("id", reviewId); // RLS: own only
     if (error) throw error;
+    if (rv)
+      await logContent({
+        kind: "review",
+        action: "delete",
+        courseName: rv.course_name as string,
+        teacher: (rv.teacher as string) ?? null,
+        semester: rv.semester as string,
+        userId: user.id,
+      });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[/api/reviews DELETE] failed:", err);

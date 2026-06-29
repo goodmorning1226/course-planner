@@ -141,7 +141,7 @@ function completeness(row) { return BUCKETS.reduce((n, b) => n + (row[b.col] != 
         teacher: teacher || null,
         match_key: matchKey(name, teacher),
         semester: sem,
-        note: idx.note >= 0 && cells[idx.note]?.trim() ? cells[idx.note].trim() : null,
+        note: null, // 來源附帶的文字一律不保留
         source: `sheet:${src.id.slice(0, 8)}`,
       };
       for (const b of BUCKETS) row[b.col] = idx.buckets[b.col] != null ? parsePct(cells[idx.buckets[b.col]]) : null;

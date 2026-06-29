@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/Textarea";
 import { StarRating, StarRatingInput } from "@/components/ui/StarRating";
+import { ThumbsUpIcon } from "@/components/icons/ThumbsUpIcon";
 import type { CourseReview } from "@/lib/courses/types";
 
 const AXES = [
@@ -61,10 +62,18 @@ export function MyReviews() {
                     {a.label} <StarRating value={rv[a.key] as number} size={13} />
                   </span>
                 ))}
-                <span>👍 {rv.like_count}</span>
+                <span className="inline-flex items-center gap-1">
+                  <ThumbsUpIcon filled className="h-3.5 w-3.5" /> {rv.like_count}
+                </span>
               </div>
               {rv.comment && <p className="whitespace-pre-wrap text-sm">{rv.comment}</p>}
-              <div className="flex gap-2">
+              <div className="flex justify-end gap-2">
+                <Link
+                  href={`/course-info?name=${encodeURIComponent(rv.course_name)}${rv.teacher ? `&teacher=${encodeURIComponent(rv.teacher)}` : ""}`}
+                  className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-transparent px-3 text-sm font-medium transition-colors hover:bg-muted"
+                >
+                  修課情報
+                </Link>
                 <Button size="sm" variant="outline" onClick={() => setEditing(rv.id)}>編輯</Button>
               </div>
             </Card>
@@ -140,10 +149,10 @@ function EditRow({ review, onDone, onCancel }: { review: CourseReview; onDone: (
         </div>
         <Textarea value={comment} onChange={(e) => setComment(e.target.value)} maxLength={500} placeholder="修課心得（選填）" />
         {err && <p className="text-sm text-[hsl(var(--warning))]">{err}</p>}
-        <div className="flex gap-2">
-          <Button size="sm" onClick={save} disabled={busy}>儲存</Button>
-          <Button size="sm" variant="outline" onClick={onCancel} disabled={busy}>取消</Button>
+        <div className="flex justify-end gap-2">
           <Button size="sm" variant="ghost" onClick={remove} disabled={busy} className="text-red-600">刪除</Button>
+          <Button size="sm" variant="outline" onClick={onCancel} disabled={busy}>取消</Button>
+          <Button size="sm" onClick={save} disabled={busy}>儲存</Button>
         </div>
       </Card>
     </li>

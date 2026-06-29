@@ -6,6 +6,9 @@ import type { SearchFilters } from "./CourseFilters";
 import { CourseCard } from "./CourseCard";
 import { Button } from "@/components/ui/button";
 import { saveSearchSnapshot, type CourseListInitial } from "@/lib/courses/searchState";
+import { matchKey } from "@/lib/reviews/key";
+
+type InfoCount = { reviews: number; grades: number };
 
 // Fetches /api/courses with cursor pagination and renders results with infinite
 // scroll (IntersectionObserver sentinel — no traditional pager). Handles
@@ -55,6 +58,10 @@ export function CourseList({
   const [hasMore, setHasMore] = useState(initialData ? initialData.hasMore : true);
   const [status, setStatus] = useState<Status>(initialData ? "ready" : "loading");
   const [retryNonce, setRetryNonce] = useState(0);
+
+  // 修課情報 counts (reviews + grades) keyed by course identity (match_key),
+  // fetched in batch per page so the cards don't each fire their own request.
+  const [infoCounts, setInfoCounts] = useState<Record<string, InfoCount>>({});
 
   // Bumped on every new search; in-flight responses with a stale id are ignored.
   const reqId = useRef(0);
@@ -117,6 +124,34 @@ export function CourseList({
     },
     []
   );
+
+  // Fetch 修課情報 counts for any newly-shown courses (covers first page,
+  // load-more, and Back-restore). Keyed by match_key so duplicates dedupe.
+  useEffect(() => {
+    const pending = new Map<string, { name: string; teacher: string | null }>();
+    for (const c of items) {
+      const key = matchKey(c.course_name, c.teacher ?? null);
+      if (!(key in infoCounts) && !pending.has(key)) {
+        pending.set(key, { name: c.course_name, teacher: c.teacher ?? null });
+      }
+    }
+    if (pending.size === 0) return;
+    const ctrl = new AbortController();
+    fetch("/api/course-info/counts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pairs: [...pending.values()].slice(0, 60) }),
+      signal: ctrl.signal,
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (j?.counts) setInfoCounts((prev) => ({ ...prev, ...j.counts }));
+      })
+      .catch(() => {
+        /* counts are best-effort; ignore */
+      });
+    return () => ctrl.abort();
+  }, [items, infoCounts]);
 
   const loadMore = useCallback(() => {
     if (!cursor) return;
@@ -198,6 +233,7 @@ export function CourseList({
           course={course}
           isSelected={isSelected(course.id)}
           onToggle={onToggle}
+          infoCount={infoCounts[matchKey(course.course_name, course.teacher ?? null)]}
         />
       ))}
 

@@ -22,11 +22,15 @@ export function CourseCard({
   course,
   isSelected = false,
   onToggle,
+  infoCount,
 }: {
   course: CourseWithSessionsAndMetadata;
   isSelected?: boolean;
   onToggle?: (course: CourseWithSessionsAndMetadata) => void;
+  /** 修課情報 totals (reviews + grade distributions); undefined until loaded. */
+  infoCount?: { reviews: number; grades: number };
 }) {
+  const infoTotal = infoCount ? infoCount.reviews + infoCount.grades : null;
   const infoHref =
     `/course-info?name=${encodeURIComponent(course.course_name)}` +
     (course.teacher ? `&teacher=${encodeURIComponent(course.teacher)}` : "");
@@ -38,21 +42,27 @@ export function CourseCard({
   const removed = course.status === "removed";
 
   return (
-    <Card className={cn(
-      "flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between",
-      removed && "opacity-75"
-    )}>
+    <Card
+      className={cn(
+        "flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between",
+        removed && "opacity-75",
+      )}
+    >
       <div className="min-w-0 space-y-2">
         {/* Primary: course name */}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h3 className={cn(
-            "text-base font-semibold leading-snug",
-            removed && "text-muted-foreground line-through"
-          )}>
+          <h3
+            className={cn(
+              "text-base font-semibold leading-snug",
+              removed && "text-muted-foreground line-through",
+            )}
+          >
             {course.course_name}
           </h3>
           {removed && (
-            <Badge className="bg-[hsl(var(--warning))]/15 text-[hsl(var(--warning))]">停開</Badge>
+            <Badge className="bg-[hsl(var(--warning))]/15 text-[hsl(var(--warning))]">
+              停開
+            </Badge>
           )}
           {course.pk && <Badge>流水號 {course.pk}</Badge>}
           {course.class_group && <Badge>班次 {course.class_group}</Badge>}
@@ -67,7 +77,8 @@ export function CourseCard({
         {course.interschool_quota != null && (
           <p className="text-xs font-medium text-[hsl(var(--warning))]">
             校際　開放台大名額 {course.interschool_quota}
-            {course.interschool_taken != null && `（已選 ${course.interschool_taken}）`}
+            {course.interschool_taken != null &&
+              `（已選 ${course.interschool_taken}）`}
           </p>
         )}
 
@@ -98,13 +109,15 @@ export function CourseCard({
             aria-label={`修課情報 ${course.course_name}`}
             className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-muted px-3 text-sm font-medium text-foreground transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
           >
-            修課情報
+            修課情報{infoTotal != null && `（${infoTotal}）`}
           </Link>
         )}
         <div className="flex items-center justify-end gap-2">
           {isSelected ? (
             <>
-              <span className="text-xs font-medium text-foreground">已加入 ✓</span>
+              <span className="text-xs font-medium text-foreground">
+                已加入 ✓
+              </span>
               <Button
                 size="sm"
                 variant="outline"
@@ -115,7 +128,9 @@ export function CourseCard({
               </Button>
             </>
           ) : removed ? (
-            <span className="text-xs font-medium text-muted-foreground">已停開</span>
+            <span className="text-xs font-medium text-muted-foreground">
+              已停開
+            </span>
           ) : (
             <Button
               size="sm"
@@ -141,9 +156,7 @@ function SessionRow({ session }: { session: CourseSession }) {
         <span className="text-muted-foreground">{session.raw_time_text}</span>
       )}
       {periods && <Badge>節次 {periods}</Badge>}
-      {session.classroom && (
-        <Badge>{session.classroom}</Badge>
-      )}
+      {session.classroom && <Badge>{session.classroom}</Badge>}
     </li>
   );
 }

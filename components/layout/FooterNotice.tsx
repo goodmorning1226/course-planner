@@ -1,11 +1,15 @@
 import { formatUpdatedAt } from "@/lib/utils";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { unstable_noStore as noStore } from "next/cache";
 
 // Always-on, site-wide disclaimer (required). The "last updated" timestamp is
 // the most recent courses.scraped_at (public-readable). scrape_runs is RLS-
 // blocked for anon clients, so courses is the source here. Any failure falls
 // back to "尚未取得" so the footer never breaks the page.
 async function getLastUpdatedAt(): Promise<string | null> {
+  // Opt out of Next's Data Cache so the footer always reflects the latest
+  // scrape — otherwise prod keeps serving the build-time value indefinitely.
+  noStore();
   try {
     const supabase = createServerSupabaseClient();
     const { data } = await supabase
@@ -31,7 +35,7 @@ export async function FooterNotice() {
           <span>非台大官方網站，正式資訊以臺大課程網為準</span>
           <span aria-hidden className="hidden sm:inline">｜</span>
           <span>
-            最後更新：
+            資料更新：
             {lastUpdatedAt ? formatUpdatedAt(lastUpdatedAt) : "尚未取得"}
           </span>
         </p>

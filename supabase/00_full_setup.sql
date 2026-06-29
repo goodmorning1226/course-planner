@@ -371,6 +371,18 @@ create table if not exists public.presence (
 );
 alter table public.presence enable row level security;
 
+-- ============================ 5f. CONTENT AUDIT (see 14_content_audit.sql) ===
+create table if not exists public.content_audit (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null, action text not null,
+  course_name text, teacher text, semester text,
+  user_id uuid, detail jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_content_audit_created on public.content_audit(created_at desc);
+create index if not exists idx_content_audit_kind on public.content_audit(kind);
+alter table public.content_audit enable row level security;
+
 -- ============================ 6. SAMPLE SEED (FAKE) ==========================
 -- Optional. Dummy data for local front-end development only. Delete this block
 -- if you only want the schema. user_timetables / timetable_courses are NOT

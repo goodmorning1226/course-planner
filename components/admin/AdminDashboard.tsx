@@ -73,6 +73,7 @@ export function AdminDashboard() {
       {/* Quick links */}
       <div className="grid gap-3 sm:grid-cols-2">
         <NavCard href="/admin/daily" title="每日歷史" desc="選日期看每小時的歷史紀錄" />
+        <NavCard href="/admin/contributions" title="評價／分布紀錄" desc="使用者新增/編輯/刪除紀錄" />
         <NavCard href="/admin/scrape" title="重新爬取" desc="分區/全部重爬，停開同步" />
         <NavCard href="/admin/changes" title="課程變動日誌" desc="新增 / 停開 / 異動紀錄" />
         <NavCard href="/admin/uncategorized" title="未分類課程" desc="搜尋並手動標上類別" />
