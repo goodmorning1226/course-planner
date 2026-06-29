@@ -11,6 +11,10 @@ import { cn, weekdayLabel } from "@/lib/utils";
 import { formatPeriods } from "@/lib/courses/periods";
 import { CourseClassification } from "./CourseClassification";
 
+// 修課情報 ships with the v2 launch — keep the per-card button hidden until then.
+// Flip to true to re-enable (the /course-info page + APIs already exist).
+const SHOW_COURSE_INFO = false;
+
 // One course as a horizontal list row. Minimal-clean hierarchy:
 //   course name = primary; serial/section/teacher = secondary; time/room = meta.
 // Null fields are omitted (never rendered as "null"/"—").
@@ -88,13 +92,15 @@ export function CourseCard({
       {/* Action: 修課情報 + add/remove. Mobile: one right-aligned row, equal
           width, 修課情報 on the left. Desktop: stacked (add on top). */}
       <div className="flex shrink-0 items-center justify-end gap-2 sm:flex-col-reverse sm:items-end">
-        <Link
-          href={infoHref}
-          aria-label={`修課情報 ${course.course_name}`}
-          className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-muted px-3 text-sm font-medium text-foreground transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
-        >
-          修課情報
-        </Link>
+        {SHOW_COURSE_INFO && (
+          <Link
+            href={infoHref}
+            aria-label={`修課情報 ${course.course_name}`}
+            className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-muted px-3 text-sm font-medium text-foreground transition-colors hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
+          >
+            修課情報
+          </Link>
+        )}
         <div className="flex items-center justify-end gap-2">
           {isSelected ? (
             <>
