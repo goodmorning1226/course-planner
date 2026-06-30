@@ -44,6 +44,8 @@ export function CourseList({
   onToggle,
   onTotal,
   initialData,
+  isFavorited,
+  onToggleFavorite,
 }: {
   q: string;
   filters: SearchFilters;
@@ -51,6 +53,8 @@ export function CourseList({
   onToggle: (course: CourseWithSessionsAndMetadata) => void;
   onTotal?: (total: number | null) => void;
   initialData?: CourseListInitial | null;
+  isFavorited?: (id: string) => boolean;
+  onToggleFavorite?: (course: CourseWithSessionsAndMetadata) => void;
 }) {
   // Hydrate from a restored snapshot (Back from 修課情報) when present.
   const [items, setItems] = useState<CourseWithSessionsAndMetadata[]>(initialData?.items ?? []);
@@ -234,6 +238,8 @@ export function CourseList({
           isSelected={isSelected(course.id)}
           onToggle={onToggle}
           infoCount={infoCounts[matchKey(course.course_name, course.teacher ?? null)]}
+          isFavorited={isFavorited?.(course.id)}
+          onToggleFavorite={onToggleFavorite}
         />
       ))}
 

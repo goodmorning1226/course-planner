@@ -10,10 +10,15 @@ import { Button } from "@/components/ui/button";
 import { cn, weekdayLabel } from "@/lib/utils";
 import { formatPeriods } from "@/lib/courses/periods";
 import { CourseClassification } from "./CourseClassification";
+import { FlagIcon } from "@/components/icons/FlagIcon";
 
 // 修課情報 ships with the v2 launch — keep the per-card button hidden until then.
 // Flip to true to re-enable (the /course-info page + APIs already exist).
 const SHOW_COURSE_INFO = false;
+
+// 課程收藏 旗幟 — hidden for now. Flip to true to re-enable (the table + API +
+// /favorites page already exist).
+const SHOW_FAVORITE_FLAG = false;
 
 // One course as a horizontal list row. Minimal-clean hierarchy:
 //   course name = primary; serial/section/teacher = secondary; time/room = meta.
@@ -23,12 +28,17 @@ export function CourseCard({
   isSelected = false,
   onToggle,
   infoCount,
+  isFavorited = false,
+  onToggleFavorite,
 }: {
   course: CourseWithSessionsAndMetadata;
   isSelected?: boolean;
   onToggle?: (course: CourseWithSessionsAndMetadata) => void;
   /** 修課情報 totals (reviews + grade distributions); undefined until loaded. */
   infoCount?: { reviews: number; grades: number };
+  /** 課程收藏 state + toggle. The flag renders only when a handler is given. */
+  isFavorited?: boolean;
+  onToggleFavorite?: (course: CourseWithSessionsAndMetadata) => void;
 }) {
   const infoTotal = infoCount ? infoCount.reviews + infoCount.grades : null;
   const infoHref =
@@ -49,8 +59,27 @@ export function CourseCard({
       )}
     >
       <div className="min-w-0 space-y-2">
-        {/* Primary: course name */}
+        {/* Primary: course name (收藏旗幟 + 課名) */}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {SHOW_FAVORITE_FLAG && onToggleFavorite && (
+            <button
+              type="button"
+              onClick={() => onToggleFavorite(course)}
+              aria-label={
+                isFavorited
+                  ? `取消收藏 ${course.course_name}`
+                  : `收藏 ${course.course_name}`
+              }
+              aria-pressed={isFavorited}
+              title={isFavorited ? "取消收藏" : "收藏課程"}
+              className={cn(
+                "shrink-0 rounded p-1 transition-colors hover:bg-muted",
+                isFavorited ? "text-foreground" : "text-muted-foreground",
+              )}
+            >
+              <FlagIcon filled={isFavorited} className="h-4 w-4" />
+            </button>
+          )}
           <h3
             className={cn(
               "text-base font-semibold leading-snug",

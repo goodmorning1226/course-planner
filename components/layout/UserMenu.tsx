@@ -60,6 +60,14 @@ export function UserMenu({ email, isAdmin }: { email: string; isAdmin: boolean }
           </div>
           <div className="h-px bg-border" />
           <Link
+            href="/favorites"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="block px-3 py-2 text-sm transition-colors hover:bg-muted"
+          >
+            收藏課程
+          </Link>
+          <Link
             href="/my-reviews"
             role="menuitem"
             onClick={() => setOpen(false)}

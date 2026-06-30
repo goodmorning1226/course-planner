@@ -10,6 +10,7 @@ import { CourseList } from "@/components/courses/CourseList";
 import { DeptPicker } from "@/components/courses/DeptPicker";
 import { COURSE_CATEGORIES, GE_AREA_LABELS } from "@/lib/courses/classification";
 import { useTimetableSelection } from "@/lib/timetable/useTimetableSelection";
+import { useFavorites } from "@/lib/courses/useFavorites";
 import { loadSearchSnapshot, type CourseListInitial } from "@/lib/courses/searchState";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,7 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
   const [hydrated, setHydrated] = useState(false);
   const initialList = useRef<CourseListInitial | null>(null);
   const selection = useTimetableSelection(userEmail);
+  const favorites = useFavorites(userEmail);
 
   // Restore the previous search (query/filters/results/scroll) on first mount,
   // so Back from a course's 修課情報 lands exactly where the user left off.
@@ -182,6 +184,19 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
         </div>
       )}
 
+      {favorites.error && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/5 px-3 py-2 text-sm text-[hsl(var(--warning))]">
+          <span>{favorites.error}</span>
+          <button
+            type="button"
+            onClick={favorites.clearError}
+            className="shrink-0 text-xs underline-offset-2 hover:underline"
+          >
+            關閉
+          </button>
+        </div>
+      )}
+
       <div className="grid gap-6 md:grid-cols-[220px_1fr]">
         <aside>
           <CourseFilters value={filters} onChange={setFilters} />
@@ -194,6 +209,8 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
             onToggle={selection.toggle}
             onTotal={setTotal}
             initialData={initialList.current}
+            isFavorited={favorites.isFavorited}
+            onToggleFavorite={favorites.toggle}
           />
         </section>
       </div>
