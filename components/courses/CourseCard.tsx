@@ -94,9 +94,7 @@ export function CourseCard({
 
         {/* Secondary: teacher / building (omitted when absent) */}
         {meta.length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {meta.join("  ·  ")}
-          </p>
+          <p className="text-xs text-muted-foreground">{meta.join("  ·  ")}</p>
         )}
 
         {/* 校際課程：開放台大名額 (only on interschool/外校 courses) */}
@@ -209,8 +207,3 @@ function SessionRow({ session }: { session: CourseSession }) {
     </li>
   );
 }
-
-
-
-
-

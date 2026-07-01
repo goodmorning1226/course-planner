@@ -157,6 +157,21 @@ export const gradeBodySchema = z.object({
 });
 export type GradeBody = z.infer<typeof gradeBodySchema>;
 
+/** Body for POST /api/grade-reports — a student's relative grade report
+ *  (A 版): their own grade + the three numbers NTU shows them. */
+const GRADE_LETTERS = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "F"] as const;
+const REQUIRED_PERCENT = z.number().min(0, "不可小於 0").max(100, "不可大於 100");
+export const gradeReportBodySchema = z.object({
+  courseName: z.string().trim().min(1, "缺少課名").max(200),
+  teacher: z.string().trim().max(100).optional().nullable(),
+  semester: SEMESTER,
+  pivot: z.enum(GRADE_LETTERS),
+  samePct: REQUIRED_PERCENT, // 與你同等第的比例（唯一精確值）
+  abovePct: REQUIRED_PERCENT.optional().nullable(), // 高於你的比例
+  belowPct: REQUIRED_PERCENT.optional().nullable(), // 低於你的比例
+});
+export type GradeReportBody = z.infer<typeof gradeReportBodySchema>;
+
 export const manualClassifySchema = z.object({
   courseId: z.string().uuid("無效的課程 id"),
   categories: z
