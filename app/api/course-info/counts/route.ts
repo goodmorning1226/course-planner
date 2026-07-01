@@ -53,18 +53,31 @@ export async function POST(req: Request) {
   try {
     const pub = createPublicServerClient();
     const [rv, gd] = await Promise.all([
-      pub.from("course_reviews").select("match_key").in("match_key", keys),
+      pub.from("course_reviews").select("match_key, rating_overall").in("match_key", keys),
       pub.from("grade_distributions").select("match_key").in("match_key", keys),
     ]);
-    const counts: Record<string, { reviews: number; grades: number }> = {};
-    for (const k of keys) counts[k] = { reviews: 0, grades: 0 };
+    type Count = { reviews: number; grades: number; rating: number | null };
+    const counts: Record<string, Count> = {};
+    // Running rating sum per key → averaged at the end.
+    const ratingSum: Record<string, number> = {};
+    for (const k of keys) {
+      counts[k] = { reviews: 0, grades: 0, rating: null };
+      ratingSum[k] = 0;
+    }
     for (const r of rv.data ?? []) {
-      const c = counts[(r as { match_key: string }).match_key];
-      if (c) c.reviews++;
+      const row = r as { match_key: string; rating_overall: number | null };
+      const c = counts[row.match_key];
+      if (c) {
+        c.reviews++;
+        ratingSum[row.match_key] += Number(row.rating_overall) || 0;
+      }
     }
     for (const g of gd.data ?? []) {
       const c = counts[(g as { match_key: string }).match_key];
       if (c) c.grades++;
+    }
+    for (const k of keys) {
+      if (counts[k].reviews > 0) counts[k].rating = ratingSum[k] / counts[k].reviews;
     }
     return NextResponse.json({ counts });
   } catch (err) {

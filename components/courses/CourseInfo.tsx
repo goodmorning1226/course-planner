@@ -58,10 +58,9 @@ export function CourseInfo({
     };
   }, [courseName, teacher]);
 
-  const count = (n: number | null) => (n != null ? `（${n}）` : "");
   const tabs = [
-    ["reviews", `課程評價${count(reviewCount)}`],
-    ["grades", `成績分布${count(gradeCount)}`],
+    ["reviews", `課程評價${reviewCount != null ? `（${reviewCount} 則評價）` : ""}`],
+    ["grades", `成績分布${gradeCount != null ? `（${gradeCount} 個學期）` : ""}`],
   ] as const;
 
   return (

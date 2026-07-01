@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { saveSearchSnapshot, type CourseListInitial } from "@/lib/courses/searchState";
 import { matchKey } from "@/lib/reviews/key";
 
-type InfoCount = { reviews: number; grades: number };
+type InfoCount = { reviews: number; grades: number; rating?: number | null };
 
 // Fetches /api/courses with cursor pagination and renders results with infinite
 // scroll (IntersectionObserver sentinel — no traditional pager). Handles
