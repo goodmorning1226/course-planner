@@ -165,15 +165,25 @@ export type GradeBody = z.infer<typeof gradeBodySchema>;
  *  (A 版): their own grade + the three numbers NTU shows them. */
 const GRADE_LETTERS = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "F"] as const;
 const REQUIRED_PERCENT = z.number().min(0, "不可小於 0").max(100, "不可大於 100");
-export const gradeReportBodySchema = z.object({
-  courseName: z.string().trim().min(1, "缺少課名").max(200),
-  teacher: z.string().trim().max(100).optional().nullable(),
-  semester: SEMESTER,
-  pivot: z.enum(GRADE_LETTERS),
-  samePct: REQUIRED_PERCENT, // 與你同等第的比例（唯一精確值）
-  abovePct: REQUIRED_PERCENT.optional().nullable(), // 高於你的比例
-  belowPct: REQUIRED_PERCENT.optional().nullable(), // 低於你的比例
-});
+export const gradeReportBodySchema = z
+  .object({
+    courseName: z.string().trim().min(1, "缺少課名").max(200),
+    teacher: z.string().trim().max(100).optional().nullable(),
+    semester: SEMESTER,
+    pivot: z.enum(GRADE_LETTERS),
+    samePct: REQUIRED_PERCENT, // 與你同等第的比例（唯一精確值）
+    abovePct: REQUIRED_PERCENT.optional().nullable(), // 高於你的比例
+    belowPct: REQUIRED_PERCENT.optional().nullable(), // 低於你的比例
+  })
+  // A+ has nothing above it; F has nothing below it — those lumps can't exist.
+  .refine((v) => !(v.pivot === "A+" && (v.abovePct ?? 0) > 0), {
+    message: "A+ 之上沒有更高等第，「高於你」不可填。",
+    path: ["abovePct"],
+  })
+  .refine((v) => !(v.pivot === "F" && (v.belowPct ?? 0) > 0), {
+    message: "F 之下沒有更低等第，「低於你」不可填。",
+    path: ["belowPct"],
+  });
 export type GradeReportBody = z.infer<typeof gradeReportBodySchema>;
 
 /** Body for DELETE /api/grade-reports — remove the viewer's own report for a

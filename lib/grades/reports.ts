@@ -48,17 +48,47 @@ const BUCKET_KEYS: (keyof LegacyBuckets)[] = [
 const EPS = 0.01;
 /** How far a distribution may sum from 100 and still count as "complete/齊". */
 const COMPLETE_TOL = 1.5;
+/** Two reports at the SAME grade disagreeing by more than this = conflict. */
+const SPREAD_TOL = 5;
+/** Slack before a sum/gap is called impossible (rounding-tolerant). */
+const CONFLICT_TOL = 3;
 
-function mean(xs: number[]): number | null {
-  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+// Aggregate repeated reports of the SAME quantity. Median (not mean) so one
+// wrong entry can't skew it; and unlike mode it still works when honest reports
+// round differently (23 vs 23.4) and so never repeat exactly.
+function median(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
 /**
  * Reconstruct segments from a set of relative reports. Known grades render as
  * solid bars (exact %); the mass above the highest / below the lowest reported
  * grade, and any gaps between reported grades, render as "未細分" bands.
+ *
+ * Consistency (approach 2): reports are meant to be observations of the SAME
+ * fact, so they must reconcile. We flag `conflict` (and give a reason) when they
+ * don't — because a user can only edit their OWN report, we can't auto-fix the
+ * bad one, so the UI degrades to "僅供參考" instead of pretending confidence:
+ *   · same grade reported with widely different % (SPREAD_TOL)
+ *   · a gap computes negative — reports around it contradict
+ *   · the exact bars alone sum to more than 100%
  */
-export function reconstruct(reports: RawReport[]): { segments: Segment[]; pinned: number } {
+export function reconstruct(reports: RawReport[]): {
+  segments: Segment[];
+  pinned: number;
+  conflict: boolean;
+  conflictReason: string | null;
+  /** Reported grade indices, ascending (highest grade first). */
+  reported: number[];
+  /** A 更高/更低 lump was drawn (that region's size is known). */
+  aboveLumpPresent: boolean;
+  belowLumpPresent: boolean;
+  /** Upper-known index of each gap whose size is UNKNOWN (below data missing). */
+  openGaps: number[];
+} {
   const same = new Map<number, number[]>();
   const above = new Map<number, number[]>();
   const below = new Map<number, number[]>();
@@ -76,42 +106,89 @@ export function reconstruct(reports: RawReport[]): { segments: Segment[]; pinned
     push(below, i, r.below_pct);
   }
 
+  let conflictReason: string | null = null;
+  const flag = (reason: string) => {
+    if (!conflictReason) conflictReason = reason;
+  };
+
   const exact = new Map<number, number>();
   for (const [i, xs] of same) {
-    const v = mean(xs);
+    // Same grade should be reported identically — flag wide disagreement.
+    if (xs.length > 1 && Math.max(...xs) - Math.min(...xs) > SPREAD_TOL) {
+      flag(`${GRADE_ORDER[i]} 有多筆回報比例差距過大`);
+    }
+    const v = median(xs);
     if (v != null) exact.set(i, v);
   }
   const reported = [...exact.keys()].sort((a, b) => a - b);
-  if (reported.length === 0) return { segments: [], pinned: 0 };
+  if (reported.length === 0) {
+    return { segments: [], pinned: 0, conflict: false, conflictReason: null, reported: [], aboveLumpPresent: false, belowLumpPresent: false, openGaps: [] };
+  }
 
-  const aboveOf = (i: number) => Math.max(0, mean(above.get(i) ?? []) ?? 0);
-  const belowOf = (i: number) => Math.max(0, mean(below.get(i) ?? []) ?? 0);
+  // null = no data for that direction (UNKNOWN) — NOT zero. This is what lets us
+  // merge incomplete imported rows with reports without inventing constraints.
+  const aboveOf = (i: number): number | null => {
+    const v = median(above.get(i) ?? []);
+    return v == null ? null : Math.max(0, v);
+  };
+  const belowOf = (i: number): number | null => {
+    const v = median(below.get(i) ?? []);
+    return v == null ? null : Math.max(0, v);
+  };
 
   const segments: Segment[] = [];
   const top = reported[0];
   const bottom = reported[reported.length - 1];
 
-  const aboveLump = aboveOf(top);
-  if (aboveLump > EPS) segments.push({ label: "更高 (未細分)", pct: aboveLump, known: false });
+  const aboveTop = aboveOf(top);
+  let aboveLumpPresent = false;
+  if (aboveTop != null && aboveTop > EPS) {
+    segments.push({ label: "更高 (未細分)", pct: aboveTop, known: false });
+    aboveLumpPresent = true;
+  }
 
+  const openGaps: number[] = [];
   for (let k = 0; k < reported.length; k++) {
     const i = reported[k];
     segments.push({ label: GRADE_ORDER[i], pct: exact.get(i)!, known: true });
     if (k < reported.length - 1) {
       const j = reported[k + 1];
       if (j > i + 1) {
-        // grades (i+1 … j-1) = below(i) − exact(j) − below(j)
-        const gap = belowOf(i) - exact.get(j)! - belowOf(j);
-        if (gap > EPS) segments.push({ label: "中間 (未細分)", pct: gap, known: false });
+        const bi = belowOf(i);
+        const bj = belowOf(j);
+        if (bi == null || bj == null) {
+          openGaps.push(i); // size unknown → buildSemester may place leftover here
+        } else {
+          // grades (i+1 … j-1) = below(i) − exact(j) − below(j)
+          const gap = bi - exact.get(j)! - bj;
+          if (gap < -CONFLICT_TOL) flag(`${GRADE_ORDER[i]} 與 ${GRADE_ORDER[j]} 的回報互相矛盾`);
+          if (gap > EPS) segments.push({ label: "中間 (未細分)", pct: gap, known: false });
+        }
       }
     }
   }
 
-  const belowLump = belowOf(bottom);
-  if (belowLump > EPS) segments.push({ label: "更低 (未細分)", pct: belowLump, known: false });
+  const belowBottom = belowOf(bottom);
+  let belowLumpPresent = false;
+  if (belowBottom != null && belowBottom > EPS) {
+    segments.push({ label: "更低 (未細分)", pct: belowBottom, known: false });
+    belowLumpPresent = true;
+  }
 
   const pinned = [...exact.values()].reduce((a, b) => a + b, 0);
-  return { segments, pinned: Math.min(100, pinned) };
+  // Disjoint grade populations can't sum past 100.
+  if (pinned > 100 + CONFLICT_TOL) flag("各等第回報加總超過 100%");
+
+  return {
+    segments,
+    pinned: Math.min(100, pinned),
+    conflict: conflictReason != null,
+    conflictReason,
+    reported,
+    aboveLumpPresent,
+    belowLumpPresent,
+    openGaps,
+  };
 }
 
 export type LegacyKind = "special" | "complete" | "partial";
@@ -174,32 +251,26 @@ export function legacyToReports(b: LegacyBuckets): { reports: RawReport[]; kind:
 
   if (complete) return { reports: perGrade(), kind: "complete" };
 
-  // Partial (doesn't sum to 100). The known buckets are bars; the leftover mass
-  // U is localised as a 更高/更低/中間(未細分) lump when the present grades pin
-  // its region — e.g. F present (bottom edge) ⇒ the leftover can only be ABOVE
-  // the highest known grade. When two regions could hold it, we can't localise,
-  // and the caller shows it as 無資料.
-  const reports = perGrade();
-  const U = 100 - sum;
-  if (U > EPS) {
-    const known = nonNull.map((x) => x.i);
-    const minK = known[0];
-    const maxK = known[known.length - 1];
-    const aboveExists = minK > 0; // grades higher than the highest known
-    const belowExists = maxK < GRADE_ORDER.length - 1; // grades lower than the lowest known
-    const gapUppers: number[] = []; // upper-known grade bordering each internal gap
-    for (let k = 0; k < known.length - 1; k++) {
-      if (known[k + 1] > known[k] + 1) gapUppers.push(known[k]);
-    }
-    const middleExists = gapUppers.length > 0;
-    const regionCount = (aboveExists ? 1 : 0) + (belowExists ? 1 : 0) + (middleExists ? 1 : 0);
-    if (regionCount === 1) {
-      const at = (i: number) => reports.find((r) => r.pivot === GRADE_ORDER[i])!;
-      if (aboveExists) at(minK).above_pct = (at(minK).above_pct ?? 0) + U;
-      else if (belowExists) at(maxK).below_pct = (at(maxK).below_pct ?? 0) + U;
-      else if (gapUppers.length === 1) at(gapUppers[0]).below_pct = (at(gapUppers[0]).below_pct ?? 0) + U;
-    }
-  }
+  // Partial (doesn't sum to 100). Contribute the known bars, but give above/below
+  // ONLY when reliable — i.e. the chain up to A+ (for above) / down to F (for
+  // below) is fully known — so merging with user reports never invents a false
+  // "0 above/below" constraint. The unaccounted leftover is placed later by
+  // buildSemester using the final merged picture (edge-localised or 無資料).
+  const knownSet = new Set(nonNull.map((x) => x.i));
+  const reliableAbove = (g: number) => {
+    for (let x = 0; x < g; x++) if (!knownSet.has(x)) return false;
+    return true;
+  };
+  const reliableBelow = (g: number) => {
+    for (let x = g + 1; x <= last; x++) if (!knownSet.has(x)) return false;
+    return true;
+  };
+  const reports = nonNull.map(({ i, v }) => ({
+    pivot: GRADE_ORDER[i],
+    same_pct: v,
+    above_pct: reliableAbove(i) ? nonNull.filter((x) => x.i < i).reduce((a, x) => a + x.v, 0) : null,
+    below_pct: reliableBelow(i) ? nonNull.filter((x) => x.i > i).reduce((a, x) => a + x.v, 0) : null,
+  }));
   return { reports, kind: "partial" };
 }
 
@@ -210,6 +281,9 @@ export interface SemesterDist {
   reportCount: number;
   /** Whether imported grade_distributions data contributed. */
   hasLegacy: boolean;
+  /** Reports contradict each other — distribution is 僅供參考 (approach 2). */
+  conflict: boolean;
+  conflictReason: string | null;
 }
 
 /** Below this leftover % we don't bother drawing an 不確定 band (rounding). */
@@ -217,38 +291,53 @@ const UNCERTAIN_MIN = 1;
 
 /**
  * Build one semester's distribution from first-hand user reports + (optionally)
- * the imported legacy row. Special/complete legacy always contributes; a
- * partial legacy row is only used when there are no user reports yet. Whatever
- * the source, the display is uniform: any mass the segments don't account for
- * (data isn't complete) is shown as a single "無資料" band, so incomplete rows
- * look the same as everything else — just with a no-data remainder.
+ * the imported legacy row. Both ALWAYS contribute — a new report never drops the
+ * imported data, they merge (the imported bars stay, the report fills in more).
+ * Any mass the segments don't account for is placed as a lump: if exactly ONE
+ * region is open (above the top / below the bottom / a single unknown gap) it's
+ * localised there (更高/更低/中間 未細分), otherwise it's genuinely 無資料.
  */
 export function buildSemester(userReports: RawReport[], legacy?: LegacyBuckets | null): SemesterDist {
   let reports = [...userReports];
   let hasLegacy = false;
   if (legacy) {
-    const { reports: legReports, kind } = legacyToReports(legacy);
+    const { reports: legReports } = legacyToReports(legacy);
     if (legReports.length > 0) {
-      if (kind === "partial") {
-        if (userReports.length === 0) {
-          reports = legReports;
-          hasLegacy = true;
-        }
+      reports = [...reports, ...legReports];
+      hasLegacy = true;
+    }
+  }
+  const rec = reconstruct(reports);
+  const segments = rec.segments;
+
+  if (segments.length > 0) {
+    const leftover = 100 - segments.reduce((a, s) => a + s.pct, 0);
+    if (leftover > UNCERTAIN_MIN) {
+      const top = rec.reported[0];
+      const bottom = rec.reported[rec.reported.length - 1];
+      const topOpen = top > 0 && !rec.aboveLumpPresent;
+      const botOpen = bottom < GRADE_ORDER.length - 1 && !rec.belowLumpPresent;
+      const openCount = (topOpen ? 1 : 0) + (botOpen ? 1 : 0) + rec.openGaps.length;
+      if (openCount === 1 && topOpen) {
+        segments.unshift({ label: "更高 (未細分)", pct: leftover, known: false });
+      } else if (openCount === 1 && botOpen) {
+        segments.push({ label: "更低 (未細分)", pct: leftover, known: false });
+      } else if (openCount === 1 && rec.openGaps.length === 1) {
+        const upper = GRADE_ORDER[rec.openGaps[0]];
+        const idx = segments.findIndex((s) => s.known && s.label === upper);
+        segments.splice(idx + 1, 0, { label: "中間 (未細分)", pct: leftover, known: false });
       } else {
-        reports = [...reports, ...legReports];
-        hasLegacy = true;
+        segments.push({ label: "無資料", pct: leftover, known: false });
       }
     }
   }
-  const { segments, pinned } = reconstruct(reports);
 
-  // Mark any unaccounted mass as 不確定 (e.g. imported rows that don't sum to
-  // 100, or a report that only gave the same-grade %).
-  if (segments.length > 0) {
-    const segSum = segments.reduce((a, s) => a + s.pct, 0);
-    const leftover = 100 - segSum;
-    if (leftover > UNCERTAIN_MIN) segments.push({ label: "無資料", pct: leftover, known: false });
-  }
-
-  return { segments, pinned, reportCount: userReports.length, hasLegacy };
+  return {
+    segments,
+    pinned: rec.pinned,
+    reportCount: userReports.length,
+    hasLegacy,
+    conflict: rec.conflict,
+    conflictReason: rec.conflictReason,
+  };
 }

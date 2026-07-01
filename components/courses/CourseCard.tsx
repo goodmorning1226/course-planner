@@ -15,11 +15,11 @@ import { StarRating } from "@/components/ui/StarRating";
 
 // 修課情報 ships with the v2 launch — keep the per-card button hidden until then.
 // Flip to true to re-enable (the /course-info page + APIs already exist).
-const SHOW_COURSE_INFO = true;
+const SHOW_COURSE_INFO = false;
 
 // 課程收藏 旗幟 — hidden for now. Flip to true to re-enable (the table + API +
 // /favorites page already exist).
-const SHOW_FAVORITE_FLAG = true;
+const SHOW_FAVORITE_FLAG = false;
 
 // One course as a horizontal list row. Minimal-clean hierarchy:
 //   course name = primary; serial/section/teacher = secondary; time/room = meta.
@@ -150,7 +150,9 @@ export function CourseCard({
           <p className="text-xs text-muted-foreground">
             {meta.map((item, i) => (
               <span key={i}>
-                {i > 0 && <span className="text-muted-foreground/60">{"  ·  "}</span>}
+                {i > 0 && (
+                  <span className="text-muted-foreground/60">{"  ·  "}</span>
+                )}
                 <span className="whitespace-nowrap">{item}</span>
               </span>
             ))}

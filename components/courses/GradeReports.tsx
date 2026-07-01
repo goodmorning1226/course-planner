@@ -21,6 +21,8 @@ interface SemesterDist {
   pinned: number;
   reportCount: number;
   hasLegacy: boolean;
+  conflict: boolean;
+  conflictReason: string | null;
 }
 interface MyReport {
   pivot: string;
@@ -143,6 +145,14 @@ export function GradeReports({
               <div className="flex items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.semester}</span>
+                  {s.conflict && (
+                    <span
+                      className="rounded bg-[hsl(var(--warning))]/15 px-1.5 py-0.5 text-xs text-[hsl(var(--warning))]"
+                      title={s.conflictReason ?? undefined}
+                    >
+                      ⚠ 資料衝突
+                    </span>
+                  )}
                 </div>
                 {/* 只有使用者回報過的學期才顯示編輯圖標；沒填過的一律不顯示。 */}
                 {loggedIn && myReports[s.semester] && (
@@ -158,8 +168,8 @@ export function GradeReports({
                 )}
               </div>
 
-              {/* Stacked reconstructed bar */}
-              <div className="flex h-5 w-full gap-px overflow-hidden rounded bg-muted">
+              {/* Stacked reconstructed bar (muted when reports conflict) */}
+              <div className={"flex h-5 w-full gap-px overflow-hidden rounded bg-muted" + (s.conflict ? " opacity-50" : "")}>
                 {s.segments.map((seg, i) => (
                   <div
                     key={i}
@@ -223,6 +233,13 @@ function ReportForm({
   }, [semester, myReports]);
 
   const editing = !!myReports[semester];
+  // A+ has nothing above it; F has nothing below it — lock (and clear) those.
+  const aboveLocked = pivot === "A+";
+  const belowLocked = pivot === "F";
+  useEffect(() => {
+    if (aboveLocked) setAbove("");
+    if (belowLocked) setBelow("");
+  }, [aboveLocked, belowLocked]);
 
   async function submit() {
     setErr(null);
@@ -250,8 +267,8 @@ function ReportForm({
           semester,
           pivot,
           samePct: sameN,
-          abovePct: num(above),
-          belowPct: num(below),
+          abovePct: aboveLocked ? null : num(above),
+          belowPct: belowLocked ? null : num(below),
         }),
       });
       if (!r.ok) {
@@ -329,9 +346,19 @@ function ReportForm({
       <span className="block text-sm font-medium">請填入 epo 系統顯示的三個比例：</span>
 
       <div className="flex flex-wrap items-end gap-6">
-        <PctField label="比您成績低的比例（選填）" value={below} onChange={setBelow} />
+        <PctField
+          label={belowLocked ? "比您成績低的比例（F 為最低）" : "比您成績低的比例（選填）"}
+          value={belowLocked ? "" : below}
+          onChange={setBelow}
+          disabled={belowLocked}
+        />
         <PctField label="與您成績相同的比例（必填）" value={same} onChange={setSame} required />
-        <PctField label="比您成績高的比例（選填）" value={above} onChange={setAbove} />
+        <PctField
+          label={aboveLocked ? "比您成績高的比例（A+ 為最高）" : "比您成績高的比例（選填）"}
+          value={aboveLocked ? "" : above}
+          onChange={setAbove}
+          disabled={aboveLocked}
+        />
         {/* 按鈕與其上方的橘紅提示小字一起靠右下角。 */}
         <div className="ml-auto flex flex-col items-end gap-1">
           {err && <p className="text-sm text-[hsl(var(--warning))]">{err}</p>}
@@ -365,14 +392,16 @@ function PctField({
   value,
   onChange,
   required,
+  disabled,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   required?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex w-44 flex-col gap-1 whitespace-nowrap text-xs">
+    <label className={"flex w-44 flex-col gap-1 whitespace-nowrap text-xs" + (disabled ? " opacity-50" : "")}>
       <span className="text-muted-foreground">
         {label}
         {required && <span className="text-[hsl(var(--warning))]"> *</span>}
@@ -385,9 +414,11 @@ function PctField({
           step="0.01"
           inputMode="decimal"
           value={value}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
+          placeholder={disabled ? "—" : undefined}
           // pr-7 leaves room for the fixed %；隱藏數字上下三角按鍵（webkit + firefox）。
-          className="h-8 w-full pr-7 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="h-8 w-full pr-7 [appearance:textfield] disabled:cursor-not-allowed [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
         <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
           %
