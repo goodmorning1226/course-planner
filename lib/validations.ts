@@ -176,6 +176,15 @@ export const gradeReportBodySchema = z.object({
 });
 export type GradeReportBody = z.infer<typeof gradeReportBodySchema>;
 
+/** Body for DELETE /api/grade-reports — remove the viewer's own report for a
+    course identity + semester. */
+export const gradeReportDeleteSchema = z.object({
+  courseName: z.string().trim().min(1, "缺少課名").max(200),
+  teacher: z.string().trim().max(100).optional().nullable(),
+  semester: SEMESTER,
+});
+export type GradeReportDelete = z.infer<typeof gradeReportDeleteSchema>;
+
 export const manualClassifySchema = z.object({
   courseId: z.string().uuid("無效的課程 id"),
   categories: z

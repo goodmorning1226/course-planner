@@ -7,10 +7,12 @@ export const metadata = { title: "修課情報" };
 export default async function CourseInfoPage({
   searchParams,
 }: {
-  searchParams: { name?: string; teacher?: string };
+  searchParams: { name?: string; teacher?: string; tab?: string; editGrade?: string };
 }) {
   const name = (searchParams.name ?? "").trim();
   const teacher = (searchParams.teacher ?? "").trim() || null;
+  const initialTab = searchParams.tab === "grades" ? "grades" : "reviews";
+  const editGrade = (searchParams.editGrade ?? "").trim() || undefined;
 
   const supabase = createServerSupabaseClient();
   const {
@@ -38,7 +40,13 @@ export default async function CourseInfoPage({
           {teacher && <span className="ml-1 text-base font-normal text-muted-foreground">（{teacher}）</span>}
         </h1>
       </header>
-      <CourseInfo courseName={name} teacher={teacher} loggedIn={!!user} />
+      <CourseInfo
+        courseName={name}
+        teacher={teacher}
+        loggedIn={!!user}
+        initialTab={initialTab}
+        initialGradeSemester={editGrade}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/Select";
@@ -20,6 +20,9 @@ const AXES = [
 ] as const;
 type AxisKey = (typeof AXES)[number]["key"];
 
+// 各頁籤的新增／編輯表單開關（null = 關閉；物件 = 開啟，可帶預設學期）。
+type FormState = { initial?: string } | null;
+
 function qs(name: string, teacher: string | null) {
   const p = new URLSearchParams({ name });
   if (teacher) p.set("teacher", teacher);
@@ -30,16 +33,26 @@ export function CourseInfo({
   courseName,
   teacher,
   loggedIn,
+  initialTab = "reviews",
+  initialGradeSemester,
 }: {
   courseName: string;
   teacher: string | null;
   loggedIn: boolean;
+  // 由 /my-reviews 的「編輯」帶入：直接開在成績分布頁、並展開該學期的回報表單。
+  initialTab?: "reviews" | "grades";
+  initialGradeSemester?: string;
 }) {
-  const [tab, setTab] = useState<"reviews" | "grades">("reviews");
+  const [tab, setTab] = useState<"reviews" | "grades">(initialTab);
   // Per-tab counts for the labels. Seeded by one counts request, then kept in
   // sync by each tab as it loads / mutates its own data.
   const [reviewCount, setReviewCount] = useState<number | null>(null);
   const [gradeCount, setGradeCount] = useState<number | null>(null);
+  // 表單開關狀態上移到這裡，讓觸發按鈕能放到頁籤列右上角、與頁籤同一行。
+  const [reviewForm, setReviewForm] = useState<FormState>(null);
+  const [gradeForm, setGradeForm] = useState<FormState>(
+    initialGradeSemester ? { initial: initialGradeSemester } : null,
+  );
 
   useEffect(() => {
     let active = true;
@@ -63,7 +76,7 @@ export function CourseInfo({
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-1">
+      <div className="flex items-center gap-3">
         {tabs.map(([k, label]) => (
           <button
             key={k}
@@ -77,11 +90,24 @@ export function CourseInfo({
             {label}
           </button>
         ))}
+        {/* 新增評論／回報成績按鈕：釘在頁籤列右上角，表單開啟時隱藏。 */}
+        {loggedIn &&
+          (tab === "reviews"
+            ? !reviewForm && (
+                <Button size="sm" variant="outline" className="ml-auto" onClick={() => setReviewForm({})}>
+                  新增／編輯評論
+                </Button>
+              )
+            : !gradeForm && (
+                <Button size="sm" variant="outline" className="ml-auto" onClick={() => setGradeForm({})}>
+                  回報 / 更新成績
+                </Button>
+              ))}
       </div>
       {tab === "reviews" ? (
-        <ReviewsTab courseName={courseName} teacher={teacher} loggedIn={loggedIn} onCount={setReviewCount} />
+        <ReviewsTab courseName={courseName} teacher={teacher} loggedIn={loggedIn} onCount={setReviewCount} form={reviewForm} setForm={setReviewForm} />
       ) : (
-        <GradeReports courseName={courseName} teacher={teacher} loggedIn={loggedIn} onCount={setGradeCount} />
+        <GradeReports courseName={courseName} teacher={teacher} loggedIn={loggedIn} onCount={setGradeCount} form={gradeForm} setForm={setGradeForm} />
       )}
     </div>
   );
@@ -90,13 +116,11 @@ export function CourseInfo({
 // ---------------------------------------------------------------------------
 // 課程評價
 // ---------------------------------------------------------------------------
-function ReviewsTab({ courseName, teacher, loggedIn, onCount }: { courseName: string; teacher: string | null; loggedIn: boolean; onCount: (n: number) => void }) {
+function ReviewsTab({ courseName, teacher, loggedIn, onCount, form, setForm }: { courseName: string; teacher: string | null; loggedIn: boolean; onCount: (n: number) => void; form: FormState; setForm: Dispatch<SetStateAction<FormState>> }) {
   const [aggregate, setAggregate] = useState<ReviewAggregate | null>(null);
   const [reviews, setReviews] = useState<CourseReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
-  // null = closed; object = open (optional initial semester from a row's pencil).
-  const [form, setForm] = useState<{ initial?: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,6 +168,23 @@ function ReviewsTab({ courseName, teacher, loggedIn, onCount }: { courseName: st
 
   return (
     <div className="space-y-4">
+      {/* 觸發按鈕在 CourseInfo 頁籤列；表單面板／未登入提示放最上面，評分總覽移到其下。 */}
+      {loggedIn && form && (
+        <ReviewForm
+          courseName={courseName}
+          teacher={teacher}
+          reviews={reviews}
+          initialSemester={form.initial}
+          onClose={() => setForm(null)}
+          onSaved={() => { setForm(null); load(); }}
+        />
+      )}
+      {!loggedIn && (
+        <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+          <Link href="/login" className="font-medium text-foreground underline">登入</Link> 後即可留下評價、按讚與檢舉。
+        </p>
+      )}
+
       {aggregate && aggregate.count > 0 ? (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-border p-3">
           {AXES.map((a) => {
@@ -166,28 +207,6 @@ function ReviewsTab({ courseName, teacher, loggedIn, onCount }: { courseName: st
 
       {loading && <p className="text-sm text-muted-foreground">載入中…</p>}
 
-      {/* 新增／編輯評論 按鈕（左上）/ 表單 */}
-      {loggedIn ? (
-        form ? (
-          <ReviewForm
-            courseName={courseName}
-            teacher={teacher}
-            reviews={reviews}
-            initialSemester={form.initial}
-            onClose={() => setForm(null)}
-            onSaved={() => { setForm(null); load(); }}
-          />
-        ) : (
-          <Button size="sm" variant="outline" onClick={() => setForm({})}>
-            新增／編輯評論
-          </Button>
-        )
-      ) : (
-        <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
-          <Link href="/login" className="font-medium text-foreground underline">登入</Link> 後即可留下評價、按讚與檢舉。
-        </p>
-      )}
-
       {!loading && (
         <ul className="space-y-3">
           {reviews.map((rv) => (
@@ -203,34 +222,37 @@ function ReviewsTab({ courseName, teacher, loggedIn, onCount }: { courseName: st
                     甜 {rv.rating_sweet} · 涼 {rv.rating_chill}
                   </span>
                 </div>
-                {rv.mine && (
+                {/* 讚放到右上角；自己的留言時放在鉛筆左邊，別人的留言就單獨靠右上。 */}
+                <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                   <button
                     type="button"
-                    onClick={() => setForm({ initial: rv.semester })}
-                    aria-label="編輯評論"
-                    title="編輯"
-                    className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    onClick={() => toggleLike(rv)}
+                    aria-label="按讚"
+                    className={"inline-flex items-center gap-1 transition-colors hover:text-foreground " + (rv.liked ? "text-foreground" : "")}
                   >
-                    <PencilIcon className="h-4 w-4" />
+                    <ThumbsUpIcon filled={rv.liked} className="h-4 w-4" /> {rv.like_count}
                   </button>
-                )}
+                  {rv.mine && (
+                    <button
+                      type="button"
+                      onClick={() => setForm({ initial: rv.semester })}
+                      aria-label="編輯評論"
+                      title="編輯"
+                      className="rounded p-1 transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <PencilIcon className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </div>
               {rv.comment && <p className="mt-2 whitespace-pre-wrap text-sm">{rv.comment}</p>}
-              <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
-                <button
-                  type="button"
-                  onClick={() => toggleLike(rv)}
-                  aria-label="按讚"
-                  className={"inline-flex items-center gap-1 transition-colors hover:text-foreground " + (rv.liked ? "text-foreground" : "")}
-                >
-                  <ThumbsUpIcon filled={rv.liked} className="h-4 w-4" /> {rv.like_count}
-                </button>
-                {!rv.mine && (
+              {!rv.mine && (
+                <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
                   <button type="button" onClick={() => report(rv)} className="transition-colors hover:text-foreground">
                     檢舉
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -325,19 +347,17 @@ function ReviewForm({
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-border p-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">新增／編輯評論</span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="關閉"
-          title="關閉"
-          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          ✕
-        </button>
-      </div>
+    <div className="relative space-y-3 rounded-lg border border-border p-5 pt-3">
+      {/* 關閉鈕釘在右上角、脫離文件流，內容才不會被推下留一片空白。 */}
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="關閉"
+        title="關閉"
+        className="absolute right-3 top-3 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        ✕
+      </button>
       <div className="flex items-center gap-2 text-sm">
         <span className="text-muted-foreground">修課學期</span>
         <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
@@ -359,8 +379,8 @@ function ReviewForm({
         ))}
       </div>
       <Textarea placeholder="留下你的修課心得（選填）" value={comment} onChange={(e) => setComment(e.target.value)} maxLength={500} />
-      {err && <p className="text-sm text-[hsl(var(--warning))]">{err}</p>}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {err && <p className="mr-auto text-sm text-[hsl(var(--warning))]">{err}</p>}
         {editing && (
           <Button size="sm" variant="ghost" onClick={remove} disabled={saving} className="text-red-600">
             刪除

@@ -6,7 +6,7 @@
 // reported grade is a solid bar; still-unknown mass shows as 未細分/不確定 bands
 // that shrink as more people report.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/Select";
@@ -38,19 +38,19 @@ function qs(name: string, teacher: string | null) {
 // 分組配色：A 綠、B 黃、C 紅、F 灰。每組三個等第（+ / 無 / -）由深到淺排列。
 // 一律用完整字串（Tailwind JIT 不會偵測拼接出來的 class）。
 const GRADE_BAR: Record<string, [string, string, string]> = {
-  A: ["bg-emerald-400/85", "bg-emerald-500/85", "bg-emerald-600/85"],
-  B: ["bg-yellow-300/85", "bg-yellow-400/85", "bg-yellow-500/85"],
-  C: ["bg-red-400/85", "bg-red-500/85", "bg-red-600/85"],
-  F: ["bg-gray-300/85", "bg-gray-400/85", "bg-gray-500/85"],
+  A: ["bg-emerald-500/95", "bg-emerald-300/90", "bg-emerald-200/85"],
+  B: ["bg-yellow-500/95", "bg-yellow-300/90", "bg-yellow-200/85"],
+  C: ["bg-red-500/95", "bg-red-300/90", "bg-red-200/85"],
+  F: ["bg-gray-500/95", "bg-gray-300/90", "bg-gray-200/85"],
 };
 const GRADE_DOT: Record<string, [string, string, string]> = {
-  A: ["bg-emerald-400", "bg-emerald-500", "bg-emerald-600"],
-  B: ["bg-yellow-300", "bg-yellow-400", "bg-yellow-500"],
-  C: ["bg-red-400", "bg-red-500", "bg-red-600"],
-  F: ["bg-gray-300", "bg-gray-400", "bg-gray-500"],
+  A: ["bg-emerald-500", "bg-emerald-300", "bg-emerald-200"],
+  B: ["bg-yellow-500", "bg-yellow-300", "bg-yellow-200"],
+  C: ["bg-red-500", "bg-red-300", "bg-red-200"],
+  F: ["bg-gray-500", "bg-gray-300", "bg-gray-200"],
 };
-// 等第在其分組中的深淺位置（由亮到暗）：+ 最亮(0)、無號次之(1)、- 最暗(2)。
-// 陣列排序為 [亮, 中, 暗]，索引直接對應深淺。
+// 等第在其分組中的位置：+ 用最鮮明飽和的正色(0)，讓 A+ 最突出；無號(1)與 -(2)
+// 逐級轉為乾淨的淺色。陣列排序為 [鮮明, 淺, 更淺]。
 function tierIndex(label: string): number {
   if (label.endsWith("+")) return 0;
   if (label.endsWith("-")) return 2;
@@ -74,16 +74,20 @@ export function GradeReports({
   teacher,
   loggedIn,
   onCount,
+  form,
+  setForm,
 }: {
   courseName: string;
   teacher: string | null;
   loggedIn: boolean;
   onCount: (n: number) => void;
+  // 表單開關狀態上移到 CourseInfo，讓「回報我的成績」按鈕能放到頁籤列右上角。
+  form: { initial?: string } | null;
+  setForm: Dispatch<SetStateAction<{ initial?: string } | null>>;
 }) {
   const [semesters, setSemesters] = useState<SemesterDist[]>([]);
   const [myReports, setMyReports] = useState<Record<string, MyReport>>({});
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState<{ initial?: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,6 +109,29 @@ export function GradeReports({
 
   return (
     <div className="space-y-4">
+      {/* 觸發按鈕在 CourseInfo 頁籤列；表單面板／未登入提示放最上面，和「新增評論」一致。 */}
+      {loggedIn && form && (
+        <ReportForm
+          courseName={courseName}
+          teacher={teacher}
+          initialSemester={form.initial}
+          myReports={myReports}
+          onClose={() => setForm(null)}
+          onSaved={() => {
+            setForm(null);
+            load();
+          }}
+        />
+      )}
+      {!loggedIn && (
+        <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+          <Link href="/login" className="font-medium text-foreground underline">
+            登入
+          </Link>{" "}
+          後即可回報你看到的成績比例，一起還原分布。
+        </p>
+      )}
+
       {loading ? (
         <p className="text-sm text-muted-foreground">載入中…</p>
       ) : semesters.length === 0 ? (
@@ -117,12 +144,13 @@ export function GradeReports({
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.semester}</span>
                 </div>
-                {loggedIn && (
+                {/* 只有使用者回報過的學期才顯示編輯圖標；沒填過的一律不顯示。 */}
+                {loggedIn && myReports[s.semester] && (
                   <button
                     type="button"
                     onClick={() => setForm({ initial: s.semester })}
-                    aria-label="編輯／補充這學期的回報"
-                    title={myReports[s.semester] ? "編輯我的回報" : "補充這學期"}
+                    aria-label="編輯這學期的回報"
+                    title="編輯我的回報"
                     className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
                     <PencilIcon className="h-4 w-4" />
@@ -143,10 +171,10 @@ export function GradeReports({
               </div>
 
               {/* Legend */}
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm font-semibold text-muted-foreground">
                 {s.segments.map((seg, i) => (
                   <span key={i} className="inline-flex items-center gap-1">
-                    <span className={"inline-block h-2 w-2 rounded-sm " + dotClass(seg)} />
+                    <span className={"inline-block h-2.5 w-2.5 rounded-sm " + dotClass(seg)} />
                     <span className={seg.known ? "text-foreground" : ""}>{seg.label}</span>
                     <span className="tabular-nums">{seg.pct.toFixed(1)}%</span>
                   </span>
@@ -155,33 +183,6 @@ export function GradeReports({
             </div>
           ))}
         </div>
-      )}
-
-      {loggedIn ? (
-        form ? (
-          <ReportForm
-            courseName={courseName}
-            teacher={teacher}
-            initialSemester={form.initial}
-            myReports={myReports}
-            onClose={() => setForm(null)}
-            onSaved={() => {
-              setForm(null);
-              load();
-            }}
-          />
-        ) : (
-          <Button size="sm" variant="outline" onClick={() => setForm({})}>
-            回報我的成績
-          </Button>
-        )
-      ) : (
-        <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
-          <Link href="/login" className="font-medium text-foreground underline">
-            登入
-          </Link>{" "}
-          後即可回報你看到的成績比例，一起還原分布。
-        </p>
       )}
     </div>
   );
@@ -222,17 +223,21 @@ function ReportForm({
   }, [semester, myReports]);
 
   const editing = !!myReports[semester];
-  const sum = useMemo(() => {
-    const n = (x: string) => (x === "" ? 0 : Number(x) || 0);
-    return n(same) + n(above) + n(below);
-  }, [same, above, below]);
 
   async function submit() {
     setErr(null);
     const num = (x: string) => (x === "" ? null : Number(x));
     const sameN = num(same);
     if (sameN == null || Number.isNaN(sameN) || sameN < 0 || sameN > 100) {
-      return setErr("「與你同等第」的比例必填，且需介於 0–100。");
+      return setErr("「與您成績相同的比例」為必填。");
+    }
+    // 只填中間一格時不必湊 100；填了兩格以上才要求加總為 100。
+    const filledCount = [below, same, above].filter((x) => x !== "").length;
+    if (filledCount >= 2) {
+      const total = (Number(below) || 0) + sameN + (Number(above) || 0);
+      if (Math.abs(total - 100) > 0.1) {
+        return setErr("三個比例加起來需等於 100%。");
+      }
     }
     setSaving(true);
     try {
@@ -261,70 +266,95 @@ function ReportForm({
     }
   }
 
+  async function remove() {
+    if (!window.confirm("確定要刪除這學期的回報嗎？")) return;
+    setErr(null);
+    setSaving(true);
+    try {
+      const r = await fetch("/api/grade-reports", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseName, teacher, semester }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => null);
+        throw new Error(j?.error?.message ?? "刪除失敗");
+      }
+      onSaved();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="space-y-3 rounded-lg border border-border p-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">回報我的成績</span>
+    <div className="space-y-4 rounded-lg border border-border p-5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <label className="flex items-center gap-2">
+            <span className="text-muted-foreground">修課學期</span>
+            <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
+              {SEMESTER_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                  {myReports[s] ? "（已回報）" : ""}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="flex items-center gap-2">
+            <span className="text-muted-foreground">你的等第</span>
+            <Select value={pivot} onChange={(e) => setPivot(e.target.value)}>
+              {GRADE_ORDER.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </Select>
+          </label>
+          {editing && <span className="text-xs text-muted-foreground">編輯我這學期的回報</span>}
+        </div>
         <button
           type="button"
           onClick={onClose}
           aria-label="關閉"
           title="關閉"
-          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           ✕
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-        <label className="flex items-center gap-2">
-          <span className="text-muted-foreground">修課學期</span>
-          <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
-            {SEMESTER_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-                {myReports[s] ? "（已回報）" : ""}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label className="flex items-center gap-2">
-          <span className="text-muted-foreground">你的等第</span>
-          <Select value={pivot} onChange={(e) => setPivot(e.target.value)}>
-            {GRADE_ORDER.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </Select>
-        </label>
-        {editing && <span className="text-xs text-muted-foreground">編輯我這學期的回報</span>}
-      </div>
+      <span className="block text-sm font-medium">請填入 epo 系統顯示的三個比例：</span>
 
-      <p className="text-xs text-muted-foreground">
-        填入查成績時系統顯示的三個比例（與你同等第為必填；填了以上/以下才能定位中間區段）：
-      </p>
-      <div className="grid grid-cols-3 gap-2">
-        <PctField label="與你同等第" value={same} onChange={setSame} required />
-        <PctField label="高於你" value={above} onChange={setAbove} />
-        <PctField label="低於你" value={below} onChange={setBelow} />
-      </div>
-      <p className="text-xs text-muted-foreground">
-        三者合計{" "}
-        <span className={Math.abs(sum - 100) <= 1 ? "text-emerald-600" : "text-[hsl(var(--warning))]"}>
-          {sum.toFixed(1)}%
-        </span>
-        {Math.abs(sum - 100) > 1 && "（理想為 100%，但僅填同等第也可以）"}
-      </p>
-
-      {err && <p className="text-sm text-[hsl(var(--warning))]">{err}</p>}
-      <div className="flex justify-end gap-2">
-        <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
-          取消
-        </Button>
-        <Button size="sm" onClick={submit} disabled={saving || same === ""}>
-          {saving ? "儲存中…" : editing ? "更新" : "送出"}
-        </Button>
+      <div className="flex flex-wrap items-end gap-6">
+        <PctField label="比您成績低的比例（選填）" value={below} onChange={setBelow} />
+        <PctField label="與您成績相同的比例（必填）" value={same} onChange={setSame} required />
+        <PctField label="比您成績高的比例（選填）" value={above} onChange={setAbove} />
+        {/* 按鈕與其上方的橘紅提示小字一起靠右下角。 */}
+        <div className="ml-auto flex flex-col items-end gap-1">
+          {err && <p className="text-sm text-[hsl(var(--warning))]">{err}</p>}
+          <div className="flex gap-2">
+            {editing && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={remove}
+                disabled={saving}
+                className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+              >
+                刪除
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
+              取消
+            </Button>
+            <Button size="sm" onClick={submit} disabled={saving}>
+              {saving ? "儲存中…" : editing ? "更新" : "送出"}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -342,22 +372,27 @@ function PctField({
   required?: boolean;
 }) {
   return (
-    <label className="space-y-1 text-xs">
+    <label className="flex w-44 flex-col gap-1 whitespace-nowrap text-xs">
       <span className="text-muted-foreground">
         {label}
         {required && <span className="text-[hsl(var(--warning))]"> *</span>}
       </span>
-      <Input
-        type="number"
-        min={0}
-        max={100}
-        step="0.01"
-        inputMode="decimal"
-        placeholder="%"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-8"
-      />
+      <div className="relative">
+        <Input
+          type="number"
+          min={0}
+          max={100}
+          step="0.01"
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          // pr-7 leaves room for the fixed %；隱藏數字上下三角按鍵（webkit + firefox）。
+          className="h-8 w-full pr-7 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
+          %
+        </span>
+      </div>
     </label>
   );
 }

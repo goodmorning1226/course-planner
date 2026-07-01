@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/supabase/server";
-import { courseInfoQuerySchema, gradeReportBodySchema } from "@/lib/validations";
+import { courseInfoQuerySchema, gradeReportBodySchema, gradeReportDeleteSchema } from "@/lib/validations";
 import { matchKey } from "@/lib/reviews/key";
 import { buildSemester, type RawReport, type LegacyBuckets } from "@/lib/grades/reports";
 import { logContent } from "@/lib/audit";
@@ -143,5 +143,43 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("[/api/grade-reports POST] failed:", err);
     return apiError("internal_error", "儲存失敗，請稍後再試。");
+  }
+}
+
+export async function DELETE(req: Request) {
+  const rl = rateLimit(clientKey(req, "reviews-write"), RATE_LIMITS.reviewWrite.limit, RATE_LIMITS.reviewWrite.windowMs);
+  if (!rl.ok) return rateLimited(rl.resetAt);
+
+  const supabase = createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return apiError("unauthorized", "請先登入。");
+
+  const parsed = gradeReportDeleteSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return apiError("invalid_request", parsed.error.issues[0]?.message ?? "請求內容不合法。");
+  const b = parsed.data;
+
+  try {
+    const svc = createServiceRoleClient();
+    const key = matchKey(b.courseName, b.teacher ?? null);
+    // Scope by user_id so a viewer can only remove their OWN report.
+    const { error } = await svc
+      .from("grade_reports")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("match_key", key)
+      .eq("semester", b.semester);
+    if (error) throw error;
+    await logContent({
+      kind: "grade",
+      action: "delete",
+      courseName: b.courseName,
+      teacher: b.teacher ?? null,
+      semester: b.semester,
+      userId: user.id,
+    });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[/api/grade-reports DELETE] failed:", err);
+    return apiError("internal_error", "刪除失敗，請稍後再試。");
   }
 }
