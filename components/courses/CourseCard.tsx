@@ -54,16 +54,69 @@ export function CourseCard({
   ].filter(Boolean) as string[];
   const removed = course.status === "removed";
 
+  // Shared action elements — placed into two different layouts (mobile row vs
+  // desktop column) below, so the button/flag/link logic isn't duplicated.
+  const flagBtn =
+    SHOW_FAVORITE_FLAG && onToggleFavorite ? (
+      <button
+        type="button"
+        onClick={() => onToggleFavorite(course)}
+        aria-pressed={isFavorited}
+        aria-label={
+          isFavorited
+            ? `取消收藏 ${course.course_name}`
+            : `收藏 ${course.course_name}`
+        }
+        title={isFavorited ? "已收藏" : "收藏課程"}
+        className={cn(
+          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border transition-colors hover:bg-muted",
+          isFavorited ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        <FlagIcon filled={isFavorited} className="h-4 w-4" />
+      </button>
+    ) : null;
+
+  const infoLink = SHOW_COURSE_INFO ? (
+    <Link
+      href={infoHref}
+      aria-label={`修課情報 ${course.course_name}`}
+      className="text-sm font-medium text-foreground underline decoration-[0.5px] underline-offset-4 transition-opacity hover:opacity-70"
+    >
+      修課情報{infoTotal != null && `（${infoTotal}）`}
+    </Link>
+  ) : null;
+
+  const actionBtn = removed ? (
+    <span className="text-xs font-medium text-muted-foreground">已停開</span>
+  ) : (
+    <Button
+      size="sm"
+      variant={isSelected ? "outline" : "primary"}
+      onClick={() => onToggle?.(course)}
+      // Fixed width + nowrap so switching add/remove (filled vs outlined)
+      // keeps the same box size and never wraps the 4-char label.
+      className="w-[88px] whitespace-nowrap"
+      aria-label={
+        isSelected
+          ? `移出課表 ${course.course_name}`
+          : `加入課表 ${course.course_name}`
+      }
+    >
+      {isSelected ? "移出課表" : "加入課表"}
+    </Button>
+  );
+
   return (
     <Card
       className={cn(
-        "flex flex-col gap-3 p-4 sm:flex-row sm:items-stretch sm:justify-between",
+        "relative flex flex-col gap-3 p-4",
         removed && "opacity-75",
       )}
     >
       <div className="min-w-0 space-y-2">
-        {/* Primary: 課名 + 總體評分 + 流水號/班次 */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {/* Primary: 課名 + 總體評分 + 流水號/班次。右側留白避開右上角的旗子。 */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:pr-12">
           <h3
             className={cn(
               "text-base font-semibold leading-snug",
@@ -76,7 +129,7 @@ export function CourseCard({
           {infoCount?.rating != null && (
             <span
               className="inline-flex items-center gap-1"
-              title={`總體評分 ${infoCount.rating.toFixed(1)}`}
+              title={`整體評分 ${infoCount.rating.toFixed(1)}`}
             >
               <StarRating value={infoCount.rating} size={14} />
               <span className="text-xs font-medium tabular-nums text-muted-foreground">
@@ -94,7 +147,14 @@ export function CourseCard({
 
         {/* Secondary: teacher / building (omitted when absent) */}
         {meta.length > 0 && (
-          <p className="text-xs text-muted-foreground">{meta.join("  ·  ")}</p>
+          <p className="text-xs text-muted-foreground">
+            {meta.map((item, i) => (
+              <span key={i}>
+                {i > 0 && <span className="text-muted-foreground/60">{"  ·  "}</span>}
+                <span className="whitespace-nowrap">{item}</span>
+              </span>
+            ))}
+          </p>
         )}
 
         {/* 校際課程：開放台大名額 (only on interschool/外校 courses) */}
@@ -124,61 +184,24 @@ export function CourseCard({
         />
       </div>
 
-      {/* Action column: 收藏旗子 top-right; 修課情報(底線) + add/remove bottom-right. */}
-      <div className="flex shrink-0 flex-col items-end gap-3">
-        {/* 右上角：收藏旗子 */}
-        {SHOW_FAVORITE_FLAG && onToggleFavorite && (
-          <button
-            type="button"
-            onClick={() => onToggleFavorite(course)}
-            aria-pressed={isFavorited}
-            aria-label={
-              isFavorited
-                ? `取消收藏 ${course.course_name}`
-                : `收藏 ${course.course_name}`
-            }
-            title={isFavorited ? "已收藏" : "收藏課程"}
-            className={cn(
-              "inline-flex h-8 w-8 items-center justify-center rounded-md border border-border transition-colors hover:bg-muted",
-              isFavorited ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            <FlagIcon filled={isFavorited} className="h-4 w-4" />
-          </button>
-        )}
+      {/* 電腦版：旗子釘在卡片右上角（內容整寬，不佔用右側整欄）。 */}
+      {flagBtn && (
+        <div className="absolute right-4 top-4 hidden sm:block">{flagBtn}</div>
+      )}
 
-        {/* 右下角：修課情報（底線）+ 加入課表 / 移出課表 */}
-        <div className="mt-auto flex items-center gap-3">
-          {SHOW_COURSE_INFO && (
-            <Link
-              href={infoHref}
-              aria-label={`修課情報 ${course.course_name}`}
-              className="text-sm font-medium text-foreground underline decoration-1 underline-offset-4 transition-opacity hover:opacity-70"
-            >
-              修課情報{infoTotal != null && `（${infoTotal}）`}
-            </Link>
-          )}
-          {removed ? (
-            <span className="text-xs font-medium text-muted-foreground">
-              已停開
-            </span>
-          ) : (
-            <Button
-              size="sm"
-              variant={isSelected ? "outline" : "primary"}
-              onClick={() => onToggle?.(course)}
-              // Fixed width + nowrap so switching add/remove (filled vs outlined)
-              // keeps the same box size and never wraps the 4-char label.
-              className="w-[88px] whitespace-nowrap"
-              aria-label={
-                isSelected
-                  ? `移出課表 ${course.course_name}`
-                  : `加入課表 ${course.course_name}`
-              }
-            >
-              {isSelected ? "移出課表" : "加入課表"}
-            </Button>
-          )}
+      {/* 電腦版：修課情報＋加入課表釘在卡片右下角，和內容同一區塊、不自成一列。
+          與右上角旗子相同做法，內容維持整寬、不被按鈕欄擠到提早換行。 */}
+      <div className="absolute bottom-4 right-4 hidden items-center gap-3 sm:flex">
+        {infoLink}
+        {actionBtn}
+      </div>
+
+      {/* 手機版：內容下方一列 — 修課情報（左）＋ 旗子＋加入課表（右）。 */}
+      <div className="flex items-center gap-3 sm:hidden">
+        {infoLink}
+        <div className="ml-auto flex items-center gap-3">
+          {flagBtn}
+          {actionBtn}
         </div>
       </div>
     </Card>

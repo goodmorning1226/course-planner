@@ -20,6 +20,8 @@ export interface TimetableSelection {
   ready: boolean;
   isSelected: (courseId: string) => boolean;
   toggle: (course: CourseWithSessions) => void;
+  /** Ids of every course currently in the timetable. */
+  ids: string[];
   /** Number of courses currently in the timetable. */
   count: number;
   /** Transient error from the last failed cloud mutation. */
@@ -141,6 +143,7 @@ export function useTimetableSelection(
     ready: loggedIn ? cloudReady : local.ready,
     isSelected,
     toggle,
+    ids: loggedIn ? Array.from(cloudIds) : local.courses.map((c) => c.id),
     count: loggedIn ? cloudIds.size : local.courses.length,
     error,
     clearError: () => setError(null),

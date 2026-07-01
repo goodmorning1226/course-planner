@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CourseWithSessionsAndMetadata } from "@/lib/courses/types";
 import type { SearchFilters } from "./CourseFilters";
 import { CourseCard } from "./CourseCard";
@@ -32,6 +32,8 @@ function buildUrl(q: string, filters: SearchFilters, cursor: string | null) {
   if (filters.deptGrade) p.set("deptGrade", filters.deptGrade);
   if (filters.isGeneralEducation) p.set("isGeneralEducation", filters.isGeneralEducation);
   if (filters.geCategory?.length) p.set("geCategory", filters.geCategory.join(","));
+  if (filters.buildingOrCollege?.length)
+    p.set("buildingOrCollege", filters.buildingOrCollege.join(","));
   if (cursor) p.set("cursor", cursor);
   p.set("limit", "30");
   return `/api/courses?${p.toString()}`;
@@ -46,6 +48,8 @@ export function CourseList({
   initialData,
   isFavorited,
   onToggleFavorite,
+  selectionReady = true,
+  selectedIds = [],
 }: {
   q: string;
   filters: SearchFilters;
@@ -55,6 +59,10 @@ export function CourseList({
   initialData?: CourseListInitial | null;
   isFavorited?: (id: string) => boolean;
   onToggleFavorite?: (course: CourseWithSessionsAndMetadata) => void;
+  /** True once the timetable selection has loaded — gates the pinned fetch. */
+  selectionReady?: boolean;
+  /** Ids of courses in the user's timetable — floated to the top of results. */
+  selectedIds?: string[];
 }) {
   // Hydrate from a restored snapshot (Back from 修課情報) when present.
   const [items, setItems] = useState<CourseWithSessionsAndMetadata[]>(initialData?.items ?? []);
@@ -66,6 +74,12 @@ export function CourseList({
   // 修課情報 counts (reviews + grades) keyed by course identity (match_key),
   // fetched in batch per page so the cards don't each fire their own request.
   const [infoCounts, setInfoCounts] = useState<Record<string, InfoCount>>({});
+
+  // Pinned courses: the ones already in the user's timetable that also match the
+  // current search/filters. Fetched from the server (so the SAME q + filters are
+  // applied), then floated to the top of the results — a course on page 5 still
+  // lands first. See the pinned effect below.
+  const [pinned, setPinned] = useState<CourseWithSessionsAndMetadata[]>([]);
 
   // Bumped on every new search; in-flight responses with a stale id are ignored.
   const reqId = useRef(0);
@@ -133,7 +147,7 @@ export function CourseList({
   // load-more, and Back-restore). Keyed by match_key so duplicates dedupe.
   useEffect(() => {
     const pending = new Map<string, { name: string; teacher: string | null }>();
-    for (const c of items) {
+    for (const c of [...items, ...pinned]) {
       const key = matchKey(c.course_name, c.teacher ?? null);
       if (!(key in infoCounts) && !pending.has(key)) {
         pending.set(key, { name: c.course_name, teacher: c.teacher ?? null });
@@ -155,7 +169,42 @@ export function CourseList({
         /* counts are best-effort; ignore */
       });
     return () => ctrl.abort();
-  }, [items, infoCounts]);
+  }, [items, pinned, infoCounts]);
+
+  // Fetch the pinned (timetable) courses matching the current search. Re-runs on
+  // every query/filter/selection change; the server applies the same q + filters
+  // via the &ids= whitelist, so only genuinely-matching timetable courses return.
+  const selectedKey = selectedIds.join(",");
+  useEffect(() => {
+    // Only prioritize timetable courses when the user is actually searching /
+    // filtering — on the default "browse everything" view, leave order untouched.
+    const hasFilters = Object.values(filters).some((v) =>
+      Array.isArray(v) ? v.length > 0 : v != null && v !== ""
+    );
+    const searchActive = q.trim() !== "" || hasFilters;
+    if (!selectionReady || selectedIds.length === 0 || !searchActive) {
+      setPinned([]);
+      return;
+    }
+    const ctrl = new AbortController();
+    const url = `${buildUrl(q, filters, null)}&ids=${encodeURIComponent(selectedKey)}`;
+    fetch(url, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => setPinned((j?.data as CourseWithSessionsAndMetadata[]) ?? []))
+      .catch(() => {
+        /* best-effort — pinning failing shouldn't break the results list */
+      });
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionReady, q, filters, selectedKey]);
+
+  // Display list: pinned courses first, then the paged results with pinned ones
+  // removed (they'd otherwise appear twice on whichever page they fall on).
+  const pinnedIds = useMemo(() => new Set(pinned.map((c) => c.id)), [pinned]);
+  const displayItems = useMemo(() => {
+    if (pinned.length === 0) return items;
+    return [...pinned, ...items.filter((c) => !pinnedIds.has(c.id))];
+  }, [pinned, pinnedIds, items]);
 
   const loadMore = useCallback(() => {
     if (!cursor) return;
@@ -218,7 +267,7 @@ export function CourseList({
     );
   }
 
-  if (items.length === 0) {
+  if (displayItems.length === 0) {
     return (
       <Notice>
         <p className="text-foreground">找不到符合條件的課程</p>
@@ -231,7 +280,7 @@ export function CourseList({
 
   return (
     <div className="space-y-3" aria-busy={status === "loadingMore"}>
-      {items.map((course) => (
+      {displayItems.map((course) => (
         <CourseCard
           key={course.id}
           course={course}

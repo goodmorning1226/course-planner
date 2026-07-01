@@ -4,21 +4,25 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/Modal";
 import { Textarea } from "@/components/ui/Textarea";
 import { StarRating, StarRatingInput } from "@/components/ui/StarRating";
 import { ThumbsUpIcon } from "@/components/icons/ThumbsUpIcon";
 import type { CourseReview } from "@/lib/courses/types";
 
 const AXES = [
-  { key: "rating_overall", label: "總體" },
+  { key: "rating_overall", label: "整體" },
   { key: "rating_sweet", label: "甜度" },
   { key: "rating_chill", label: "涼度" },
-  { key: "rating_solid", label: "扎實" },
 ] as const;
 
 export function MyReviews() {
   const [reviews, setReviews] = useState<CourseReview[] | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  // 刪除確認彈窗：deleteTarget 為待刪除的評價（null 時關閉）。
+  const [deleteTarget, setDeleteTarget] = useState<CourseReview | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -29,6 +33,26 @@ export function MyReviews() {
       setReviews([]);
     }
   }, []);
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleteErr(null);
+    setDeleteBusy(true);
+    try {
+      const r = await fetch("/api/reviews", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewId: deleteTarget.id }),
+      });
+      if (!r.ok) throw new Error();
+      setDeleteTarget(null);
+      setDeleteBusy(false);
+      load();
+    } catch {
+      setDeleteErr("刪除失敗，請稍後再試。");
+      setDeleteBusy(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -44,7 +68,8 @@ export function MyReviews() {
     );
 
   return (
-    <ul className="space-y-3">
+    <>
+      <ul className="space-y-3">
       {reviews.map((rv) =>
         editing === rv.id ? (
           <EditRow key={rv.id} review={rv} onDone={() => { setEditing(null); load(); }} onCancel={() => setEditing(null)} />
@@ -55,6 +80,10 @@ export function MyReviews() {
                 <span className="font-medium">{rv.course_name}</span>
                 {rv.teacher && <span className="text-xs text-muted-foreground">{rv.teacher}</span>}
                 <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{rv.semester}</span>
+                {/* 讚數釘在標題行右上角 */}
+                <span className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <ThumbsUpIcon filled className="h-3.5 w-3.5" /> {rv.like_count}
+                </span>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 {AXES.map((a) => (
@@ -62,9 +91,6 @@ export function MyReviews() {
                     {a.label} <StarRating value={rv[a.key] as number} size={13} />
                   </span>
                 ))}
-                <span className="inline-flex items-center gap-1">
-                  <ThumbsUpIcon filled className="h-3.5 w-3.5" /> {rv.like_count}
-                </span>
               </div>
               {rv.comment && <p className="whitespace-pre-wrap text-sm">{rv.comment}</p>}
               <div className="flex justify-end gap-2">
@@ -75,18 +101,52 @@ export function MyReviews() {
                   修課情報
                 </Link>
                 <Button size="sm" variant="outline" onClick={() => setEditing(rv.id)}>編輯</Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setDeleteTarget(rv)}
+                  className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                >
+                  刪除
+                </Button>
               </div>
             </Card>
           </li>
         )
       )}
-    </ul>
+      </ul>
+
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => { if (!deleteBusy) setDeleteTarget(null); }}
+        title="刪除評價"
+        className="max-w-sm"
+      >
+        <p className="text-sm text-muted-foreground">
+          確定要刪除「{deleteTarget?.course_name}」的評價嗎？此動作無法復原。
+        </p>
+        {deleteErr && <p className="mt-2 text-sm text-red-600">{deleteErr}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>
+            取消
+          </Button>
+          <Button
+            size="sm"
+            onClick={confirmDelete}
+            disabled={deleteBusy}
+            className="bg-red-600 text-white hover:bg-red-700"
+          >
+            {deleteBusy ? "刪除中…" : "刪除"}
+          </Button>
+        </div>
+      </Modal>
+    </>
   );
 }
 
 function EditRow({ review, onDone, onCancel }: { review: CourseReview; onDone: () => void; onCancel: () => void }) {
   const [ratings, setRatings] = useState({
-    overall: review.rating_overall, sweet: review.rating_sweet, chill: review.rating_chill, solid: review.rating_solid,
+    overall: review.rating_overall, sweet: review.rating_sweet, chill: review.rating_chill,
   });
   const [comment, setComment] = useState(review.comment ?? "");
   const [busy, setBusy] = useState(false);
@@ -99,7 +159,8 @@ function EditRow({ review, onDone, onCancel }: { review: CourseReview; onDone: (
       const r = await fetch("/api/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ courseName: review.course_name, teacher: review.teacher, semester: review.semester, ...ratings, comment }),
+        // 扎實 已從介面移除，但後端仍要求 solid；沿用總體評分填入以符合驗證。
+        body: JSON.stringify({ courseName: review.course_name, teacher: review.teacher, semester: review.semester, ...ratings, solid: ratings.overall, comment }),
       });
       if (!r.ok) throw new Error();
       onDone();
@@ -109,26 +170,9 @@ function EditRow({ review, onDone, onCancel }: { review: CourseReview; onDone: (
     }
   }
 
-  async function remove() {
-    if (!window.confirm("確定要刪除這則評價嗎？")) return;
-    setBusy(true);
-    try {
-      const r = await fetch("/api/reviews", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewId: review.id }),
-      });
-      if (!r.ok) throw new Error();
-      onDone();
-    } catch {
-      setErr("刪除失敗。");
-      setBusy(false);
-    }
-  }
-
   const INPUTS = [
-    { key: "overall", label: "總體" }, { key: "sweet", label: "甜度" },
-    { key: "chill", label: "涼度" }, { key: "solid", label: "扎實" },
+    { key: "overall", label: "整體" }, { key: "sweet", label: "甜度" },
+    { key: "chill", label: "涼度" },
   ] as const;
 
   return (
@@ -139,7 +183,7 @@ function EditRow({ review, onDone, onCancel }: { review: CourseReview; onDone: (
           {review.teacher && <span className="text-xs text-muted-foreground">{review.teacher}</span>}
           <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{review.semester}</span>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {INPUTS.map((a) => (
             <div key={a.key} className="space-y-1">
               <p className="text-xs text-muted-foreground">{a.label}</p>
@@ -150,7 +194,6 @@ function EditRow({ review, onDone, onCancel }: { review: CourseReview; onDone: (
         <Textarea value={comment} onChange={(e) => setComment(e.target.value)} maxLength={500} placeholder="修課心得（選填）" />
         {err && <p className="text-sm text-[hsl(var(--warning))]">{err}</p>}
         <div className="flex justify-end gap-2">
-          <Button size="sm" variant="ghost" onClick={remove} disabled={busy} className="text-red-600">刪除</Button>
           <Button size="sm" variant="outline" onClick={onCancel} disabled={busy}>取消</Button>
           <Button size="sm" onClick={save} disabled={busy}>儲存</Button>
         </div>

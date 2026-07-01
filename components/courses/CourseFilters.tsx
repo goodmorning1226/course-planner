@@ -20,6 +20,7 @@ export interface SearchFilters {
   deptGrade?: string; // "<deptCode>:<gradeId>" — only when a single dept is picked
   isGeneralEducation?: "true" | "false";
   geCategory?: string[]; // 通識領域 A1–A8: one or many (OR)
+  buildingOrCollege?: string[]; // 開課地點: one or many labels (OR)
 }
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7];
@@ -48,7 +49,22 @@ export function CourseFilters({
   onChange: (filters: SearchFilters) => void;
 }) {
   const [draft, setDraft] = useState<SearchFilters>(value);
+  const [buildings, setBuildings] = useState<string[]>([]);
   const firstRun = useRef(true);
+
+  // Load the 開課地點 options once (cached server-side).
+  useEffect(() => {
+    let active = true;
+    fetch("/api/courses/buildings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (active && j?.buildings) setBuildings(j.buildings as string[]);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Re-sync when the parent changes filters elsewhere (e.g. the 課程大類 row).
   useEffect(() => {
@@ -73,6 +89,19 @@ export function CourseFilters({
       if (next.length === 0) delete out[key];
       else if (key === "weekday") out.weekday = next as number[];
       else out.period = next as string[];
+      return out;
+    });
+  }
+
+  function toggleBuilding(val: string) {
+    setDraft((d) => {
+      const cur = d.buildingOrCollege ?? [];
+      const next = cur.includes(val)
+        ? cur.filter((x) => x !== val)
+        : [...cur, val];
+      const out = { ...d };
+      if (next.length) out.buildingOrCollege = next;
+      else delete out.buildingOrCollege;
       return out;
     });
   }
@@ -115,6 +144,27 @@ export function CourseFilters({
           ))}
         </div>
       </FilterGroup>
+
+      {buildings.length > 0 && (
+        <FilterGroup label="開課地點">
+          <div className="flex max-h-44 flex-wrap gap-1 overflow-y-auto">
+            {buildings.map((b) => (
+              <button
+                key={b}
+                type="button"
+                onClick={() => toggleBuilding(b)}
+                className={cn(
+                  "whitespace-nowrap",
+                  CHIP,
+                  chipCls(!!draft.buildingOrCollege?.includes(b)),
+                )}
+              >
+                {b}
+              </button>
+            ))}
+          </div>
+        </FilterGroup>
+      )}
     </Card>
   );
 }

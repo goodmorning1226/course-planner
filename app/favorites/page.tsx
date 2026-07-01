@@ -22,9 +22,8 @@ export default async function FavoritesPage() {
 
   return (
     <div className="space-y-5">
-      <header className="space-y-1">
+      <header className="space-y-1 text-center">
         <h1 className="text-xl font-semibold">收藏課程</h1>
-        <p className="text-sm text-muted-foreground">你收藏的課程，可加入課表或取消收藏。</p>
       </header>
       <FavoritesClient userEmail={user.email ?? ""} />
     </div>

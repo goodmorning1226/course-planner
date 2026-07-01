@@ -78,8 +78,14 @@ export async function GET(req: Request) {
     isGeneralEducation, geCategory, targetDepartment, requirement,
     classificationSource, classificationConfidence,
     hideRemoved,
+    ids,
     cursor, limit,
   } = parsed.data;
+
+  // Optional id whitelist (pinned/timetable courses). Sanitize to id-safe chars.
+  const idList = ids
+    ? ids.split(",").map((s) => s.trim()).filter((s) => /^[0-9A-Za-z-]+$/.test(s))
+    : undefined;
 
   // 系所大類: dept codes (OR) via array-overlaps on course_metadata.dept_codes.
   const deptCodes = dept ? dept.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
@@ -87,6 +93,7 @@ export async function GET(req: Request) {
   // Multi-select filters: comma lists → arrays (OR within each group).
   const weekdays = weekday ? weekday.split(",").map(Number) : undefined;
   const periods = period ? period.split(",") : undefined;
+  // 開課地點: one or many exact labels (OR).
   const buildings = buildingOrCollege
     ? buildingOrCollege.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
@@ -166,7 +173,10 @@ export async function GET(req: Request) {
     if (requirement)
       cq = cq.eq("course_requirements.requirement_normalized", requirement);
 
-    // Course-level filters: building/college is an exact-label list (OR).
+    // Pinned/timetable id whitelist: restrict to these course ids.
+    if (idList?.length) cq = cq.in("id", idList);
+
+    // Course-level filters: 開課地點 exact-label list (OR).
     if (buildings?.length) cq = cq.in("building_or_college", buildings);
     if (teacher) cq = cq.ilike("teacher", `%${teacher}%`);
     // Soft-delete: 停開 courses stay searchable (marked) by default; hide on request.

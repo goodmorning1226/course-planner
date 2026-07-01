@@ -35,24 +35,38 @@ function qs(name: string, teacher: string | null) {
   return p.toString();
 }
 
+// 分組配色：A 綠、B 黃、C 紅、F 灰。每組三個等第（+ / 無 / -）由深到淺排列。
+// 一律用完整字串（Tailwind JIT 不會偵測拼接出來的 class）。
+const GRADE_BAR: Record<string, [string, string, string]> = {
+  A: ["bg-emerald-400/85", "bg-emerald-500/85", "bg-emerald-600/85"],
+  B: ["bg-yellow-300/85", "bg-yellow-400/85", "bg-yellow-500/85"],
+  C: ["bg-red-400/85", "bg-red-500/85", "bg-red-600/85"],
+  F: ["bg-gray-300/85", "bg-gray-400/85", "bg-gray-500/85"],
+};
+const GRADE_DOT: Record<string, [string, string, string]> = {
+  A: ["bg-emerald-400", "bg-emerald-500", "bg-emerald-600"],
+  B: ["bg-yellow-300", "bg-yellow-400", "bg-yellow-500"],
+  C: ["bg-red-400", "bg-red-500", "bg-red-600"],
+  F: ["bg-gray-300", "bg-gray-400", "bg-gray-500"],
+};
+// 等第在其分組中的深淺位置（由亮到暗）：+ 最亮(0)、無號次之(1)、- 最暗(2)。
+// 陣列排序為 [亮, 中, 暗]，索引直接對應深淺。
+function tierIndex(label: string): number {
+  if (label.endsWith("+")) return 0;
+  if (label.endsWith("-")) return 2;
+  return 1;
+}
+
 // Colour a segment: grey stripes for an unknown lump (未細分/不確定), else by
 // grade tier.
 function segClass(seg: Segment): string {
   if (!seg.known)
     return "bg-[repeating-linear-gradient(45deg,hsl(var(--muted-foreground)/0.18)_0_6px,hsl(var(--muted-foreground)/0.06)_6px_12px)]";
-  const c = seg.label[0];
-  if (c === "A") return "bg-emerald-500/80";
-  if (c === "B") return "bg-sky-500/80";
-  if (c === "C") return "bg-amber-500/80";
-  return "bg-rose-500/80"; // F
+  return (GRADE_BAR[seg.label[0]] ?? GRADE_BAR.F)[tierIndex(seg.label)];
 }
 function dotClass(seg: Segment): string {
   if (!seg.known) return "bg-muted-foreground/30";
-  const c = seg.label[0];
-  if (c === "A") return "bg-emerald-500";
-  if (c === "B") return "bg-sky-500";
-  if (c === "C") return "bg-amber-500";
-  return "bg-rose-500";
+  return (GRADE_DOT[seg.label[0]] ?? GRADE_DOT.F)[tierIndex(seg.label)];
 }
 
 export function GradeReports({

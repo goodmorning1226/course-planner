@@ -65,6 +65,10 @@ export const courseSearchQuerySchema = z.object({
   classificationConfidence: z.enum(["high", "medium", "low", "unknown"]).optional(),
   // Soft-delete: hide 停開 (status='removed') courses. Default shows them, marked.
   hideRemoved: z.enum(["true", "false"]).optional(),
+  // Restrict results to a set of course ids (comma-separated). Used to fetch the
+  // "pinned" courses (already in the user's timetable) that match a search, so
+  // they can be floated to the top of the results.
+  ids: z.string().trim().max(4000).optional(),
   cursor: cursorSchema.optional(),
   limit: z.coerce.number().int().min(1).max(50).default(30),
 });

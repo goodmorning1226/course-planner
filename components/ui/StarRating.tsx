@@ -59,28 +59,34 @@ export function StarRatingInput({
   const [hover, setHover] = useState<number | null>(null);
   const shown = hover ?? value;
   return (
-    <span className="inline-flex gap-0.5">
-      {[0, 1, 2, 3, 4].map((i) => (
-        <span key={i} className="relative" style={{ width: size, height: size }}>
-          <Star fill={fillFor(shown, i)} size={size} />
-          <button
-            type="button"
-            aria-label={`${i + 0.5} 星`}
-            className="absolute inset-y-0 left-0 w-1/2 cursor-pointer"
-            onMouseEnter={() => setHover(i + 0.5)}
-            onMouseLeave={() => setHover(null)}
-            onClick={() => onChange(i + 0.5)}
-          />
-          <button
-            type="button"
-            aria-label={`${i + 1} 星`}
-            className="absolute inset-y-0 right-0 w-1/2 cursor-pointer"
-            onMouseEnter={() => setHover(i + 1)}
-            onMouseLeave={() => setHover(null)}
-            onClick={() => onChange(i + 1)}
-          />
-        </span>
-      ))}
+    <span className="inline-flex items-center gap-1.5">
+      <span className="inline-flex gap-0.5">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <span key={i} className="relative" style={{ width: size, height: size }}>
+            <Star fill={fillFor(shown, i)} size={size} />
+            <button
+              type="button"
+              aria-label={`${i + 0.5} 星`}
+              className="absolute inset-y-0 left-0 w-1/2 cursor-pointer"
+              onMouseEnter={() => setHover(i + 0.5)}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => onChange(i + 0.5)}
+            />
+            <button
+              type="button"
+              aria-label={`${i + 1} 星`}
+              className="absolute inset-y-0 right-0 w-1/2 cursor-pointer"
+              onMouseEnter={() => setHover(i + 1)}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => onChange(i + 1)}
+            />
+          </span>
+        ))}
+      </span>
+      {/* 即時顯示目前（或滑鼠預覽）的星等數字 */}
+      <span className="min-w-[1.75rem] text-xs font-medium tabular-nums text-muted-foreground">
+        {shown > 0 ? shown.toFixed(1) : ""}
+      </span>
     </span>
   );
 }

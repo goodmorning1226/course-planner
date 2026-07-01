@@ -211,6 +211,8 @@ export function CoursesClient({ userEmail }: { userEmail: string | null }) {
             initialData={initialList.current}
             isFavorited={favorites.isFavorited}
             onToggleFavorite={favorites.toggle}
+            selectionReady={selection.ready}
+            selectedIds={selection.ids}
           />
         </section>
       </div>

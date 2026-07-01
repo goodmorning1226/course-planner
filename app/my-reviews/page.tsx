@@ -22,9 +22,8 @@ export default async function MyReviewsPage() {
 
   return (
     <div className="space-y-5">
-      <header className="space-y-1">
+      <header className="space-y-1 text-center">
         <h1 className="text-xl font-semibold">我的評論</h1>
-        <p className="text-sm text-muted-foreground">你留下的課程評價，可隨時編輯或刪除。</p>
       </header>
       <MyReviews />
     </div>

@@ -14,10 +14,9 @@ import type { CourseReview, ReviewAggregate } from "@/lib/courses/types";
 // Public can browse; logged-in users write. (Rendered by /course-info, not a modal.)
 
 const AXES = [
-  { key: "overall", label: "總體" },
+  { key: "overall", label: "整體" },
   { key: "sweet", label: "甜度" },
   { key: "chill", label: "涼度" },
-  { key: "solid", label: "扎實" },
 ] as const;
 type AxisKey = (typeof AXES)[number]["key"];
 
@@ -198,10 +197,10 @@ function ReviewsTab({ courseName, teacher, loggedIn, onCount }: { courseName: st
                   <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{rv.semester}</span>
                   {rv.mine && <span className="rounded bg-foreground px-1.5 py-0.5 text-xs text-background">我的</span>}
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    總體 <StarRating value={rv.rating_overall} size={14} />
+                    整體 <StarRating value={rv.rating_overall} size={14} />
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    甜 {rv.rating_sweet} · 涼 {rv.rating_chill} · 扎 {rv.rating_solid}
+                    甜 {rv.rating_sweet} · 涼 {rv.rating_chill}
                   </span>
                 </div>
                 {rv.mine && (
@@ -240,9 +239,9 @@ function ReviewsTab({ courseName, teacher, loggedIn, onCount }: { courseName: st
   );
 }
 
-const emptyRatings = (): Record<AxisKey, number> => ({ overall: 0, sweet: 0, chill: 0, solid: 0 });
+const emptyRatings = (): Record<AxisKey, number> => ({ overall: 0, sweet: 0, chill: 0 });
 const fillRatings = (r?: CourseReview): Record<AxisKey, number> =>
-  r ? { overall: r.rating_overall, sweet: r.rating_sweet, chill: r.rating_chill, solid: r.rating_solid } : emptyRatings();
+  r ? { overall: r.rating_overall, sweet: r.rating_sweet, chill: r.rating_chill } : emptyRatings();
 const defaultReviewSemester = (mineBySem: Map<string, CourseReview>) =>
   SEMESTER_OPTIONS.find((s) => !mineBySem.has(s)) ?? SEMESTER_OPTIONS[0];
 
@@ -285,13 +284,14 @@ function ReviewForm({
 
   async function submit() {
     setErr(null);
-    if (!ready) return setErr("四個項目都要給星等（至少半顆）。");
+    if (!ready) return setErr("三個項目都要給星等（至少半顆）。");
     setSaving(true);
     try {
       const r = await fetch("/api/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ courseName, teacher, semester, ...ratings, comment }),
+        // 扎實 已從介面移除，但後端仍要求 solid；沿用整體評分填入以符合驗證。
+        body: JSON.stringify({ courseName, teacher, semester, ...ratings, solid: ratings.overall, comment }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => null);
@@ -350,7 +350,7 @@ function ReviewForm({
         </Select>
         {editing && <span className="text-xs text-muted-foreground">編輯既有</span>}
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {AXES.map((a) => (
           <div key={a.key} className="space-y-1">
             <p className="text-xs text-muted-foreground">{a.label}</p>

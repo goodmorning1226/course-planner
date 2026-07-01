@@ -22,9 +22,9 @@ export function TimetableView({ userEmail }: { userEmail: string | null }) {
     loggedIn ? "loading" : "ready"
   );
 
-  // Weekend (Sat/Sun) columns are shown by default; the top-right「隱藏週末」
-  // switch lets the user collapse them.
-  const [showWeekend, setShowWeekend] = useState(true);
+  // 晚上 (A–D) rows are shown by default; the top-right「隱藏晚上」switch lets
+  // the user collapse them.
+  const [hideEvening, setHideEvening] = useState(false);
 
   const [mergeDismissed, setMergeDismissed] = useState(false);
   const [mergeStatus, setMergeStatus] = useState<"idle" | "merging" | "error">(
@@ -192,40 +192,35 @@ export function TimetableView({ userEmail }: { userEmail: string | null }) {
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
             <span>已加入 {courses.length} 門課・最多 {totalCredits} 學分</span>
 
-            {(() => {
-              const hidden = !showWeekend; // switch is ON when weekends are hidden
-              return (
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={hidden}
-                  onClick={() => setShowWeekend((v) => !v)}
-                  className="ml-auto inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <span>隱藏週末</span>
-                  <span
-                    className={cn(
-                      "relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors",
-                      hidden ? "bg-foreground" : "bg-border"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "absolute left-0.5 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-background shadow-sm transition-transform",
-                        hidden ? "translate-x-4" : "translate-x-0"
-                      )}
-                    />
-                  </span>
-                </button>
-              );
-            })()}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={hideEvening}
+              onClick={() => setHideEvening((v) => !v)}
+              className="ml-auto inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <span>隱藏晚上</span>
+              <span
+                className={cn(
+                  "relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors",
+                  hideEvening ? "bg-foreground" : "bg-border"
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute left-0.5 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-background shadow-sm transition-transform",
+                    hideEvening ? "translate-x-4" : "translate-x-0"
+                  )}
+                />
+              </span>
+            </button>
           </div>
 
           {/* Always the grid — it scrolls horizontally when space is tight. */}
           <TimetableGrid
             courses={courses}
             onRemove={remove}
-            showWeekend={showWeekend}
+            hideEvening={hideEvening}
           />
 
           <div className="flex justify-center pt-2">

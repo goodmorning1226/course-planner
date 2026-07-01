@@ -65,7 +65,7 @@ export function UserMenu({ email, isAdmin }: { email: string; isAdmin: boolean }
             onClick={() => setOpen(false)}
             className="block px-3 py-2 text-sm transition-colors hover:bg-muted"
           >
-            收藏課程
+            我的收藏
           </Link>
           <Link
             href="/my-reviews"
