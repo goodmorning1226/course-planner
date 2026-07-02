@@ -207,11 +207,11 @@ export function ReportForm({
   // inline=true：不用彈出視窗，直接在原位展開表單（用於「我的評論」成績分布頁）。
   inline?: boolean;
 }) {
-  // 一人一課只留一筆：已回報過就預設載入該學期（更新它），否則用最新學期。
-  const [semester, setSemester] = useState(
-    initialSemester ?? Object.keys(myReports)[0] ?? SEMESTER_OPTIONS[0],
-  );
-  const mine = myReports[semester];
+  // 一人一課只留一筆。載入使用者現有的那筆（不分學期），編輯時可改學期而不清空
+  // 已填的等第與比例——換學期只是把這筆「移到」另一個學期。
+  const existing = Object.entries(myReports)[0]; // [semester, MyReport] | undefined
+  const mine = existing?.[1];
+  const [semester, setSemester] = useState(initialSemester ?? existing?.[0] ?? SEMESTER_OPTIONS[0]);
   const [pivot, setPivot] = useState(mine?.pivot ?? "A");
   const [same, setSame] = useState(mine?.samePct != null ? String(mine.samePct) : "");
   const [above, setAbove] = useState(mine?.abovePct != null ? String(mine.abovePct) : "");
@@ -219,15 +219,7 @@ export function ReportForm({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    const m = myReports[semester];
-    setPivot(m?.pivot ?? "A");
-    setSame(m?.samePct != null ? String(m.samePct) : "");
-    setAbove(m?.abovePct != null ? String(m.abovePct) : "");
-    setBelow(m?.belowPct != null ? String(m.belowPct) : "");
-  }, [semester, myReports]);
-
-  const editing = !!myReports[semester];
+  const editing = !!mine;
   // A+ has nothing above it; F has nothing below it — lock (and clear) those.
   const aboveLocked = pivot === "A+";
   const belowLocked = pivot === "F";

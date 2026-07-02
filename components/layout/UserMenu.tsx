@@ -51,10 +51,16 @@ export function UserMenu({ email, isAdmin }: { email: string; isAdmin: boolean }
         <AvatarIcon className="h-8 w-8" />
       </button>
       {open && (
-        <div
-          role="menu"
-          className="absolute right-0 z-40 mt-2 min-w-[180px] overflow-hidden rounded-md border border-border bg-background py-1 shadow-lg"
-        >
+        <div className="absolute -right-2 top-full z-50 mt-4 min-w-[190px]">
+          {/* 對話框小三角形，指向頭像；往上突出橋接（可壓到 navbar）。 */}
+          <span
+            aria-hidden
+            className="absolute -top-2 right-4 h-3 w-3 rotate-45 border-l border-t border-border bg-background"
+          />
+          <div
+            role="menu"
+            className="relative overflow-hidden rounded-md border border-border bg-background py-1 shadow-lg"
+          >
           <div className="truncate px-3 py-2 text-xs text-muted-foreground" title={email}>
             {email}
           </div>
@@ -95,6 +101,7 @@ export function UserMenu({ email, isAdmin }: { email: string; isAdmin: boolean }
           >
             {loading ? "登出中…" : "登出"}
           </button>
+          </div>
         </div>
       )}
     </div>

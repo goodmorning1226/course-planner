@@ -12,9 +12,13 @@ async function getLastUpdatedAt(): Promise<string | null> {
   noStore();
   try {
     const supabase = createServerSupabaseClient();
+    // Only courses actually pulled by the scraper carry a source_url — this
+    // excludes manually-inserted rows (e.g. the test course) so 資料更新 always
+    // reflects a real course re-scrape.
     const { data } = await supabase
       .from("courses")
       .select("scraped_at")
+      .not("source_url", "is", null)
       .order("scraped_at", { ascending: false })
       .limit(1)
       .maybeSingle();
