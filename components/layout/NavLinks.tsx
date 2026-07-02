@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 // Main nav links with an active-page highlight. Client component so it can read
 // the current pathname; the rest of the Navbar stays a server component.
 // `shortLabel` is shown on narrow screens where the full label wouldn't fit.
-const NAV_LINKS = [
+const NAV_LINKS: { href: string; label: string; shortLabel?: string }[] = [
   { href: "/", label: "課程搜尋" },
   { href: "/timetable", label: "我的課表" },
 ];
