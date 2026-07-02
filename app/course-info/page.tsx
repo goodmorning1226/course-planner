@@ -7,12 +7,20 @@ export const metadata = { title: "修課情報" };
 export default async function CourseInfoPage({
   searchParams,
 }: {
-  searchParams: { name?: string; teacher?: string; tab?: string; editGrade?: string };
+  searchParams: { name?: string; teacher?: string; tab?: string; editGrade?: string; from?: string };
 }) {
   const name = (searchParams.name ?? "").trim();
   const teacher = (searchParams.teacher ?? "").trim() || null;
   const initialTab = searchParams.tab === "grades" ? "grades" : "reviews";
   const editGrade = (searchParams.editGrade ?? "").trim() || undefined;
+  // 返回連結預設回課程搜尋；若從「我的評論」進來則返回該頁，並保留原本的頁籤
+  // （from=my-reviews → 課程評價；from=my-grades → 成績分布）。
+  const back =
+    searchParams.from === "my-reviews"
+      ? { href: "/my-reviews", label: "← 我的評論" }
+      : searchParams.from === "my-grades"
+        ? { href: "/my-reviews?tab=grades", label: "← 我的評論" }
+        : { href: "/", label: "← 課程搜尋" };
 
   const supabase = createServerSupabaseClient();
   const {
@@ -32,8 +40,8 @@ export default async function CourseInfoPage({
   return (
     <div className="space-y-5">
       <header className="space-y-1">
-        <Link href="/" className="text-sm text-muted-foreground underline-offset-2 hover:underline">
-          ← 課程搜尋
+        <Link href={back.href} className="text-sm text-muted-foreground underline-offset-2 hover:underline">
+          {back.label}
         </Link>
         <h1 className="text-xl font-semibold">
           修課情報 · {name}

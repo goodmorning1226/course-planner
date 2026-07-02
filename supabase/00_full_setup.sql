@@ -299,8 +299,8 @@ create table if not exists public.course_reviews (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   course_name text not null, teacher text, match_key text not null, semester text not null,
-  rating_overall numeric(2,1) not null, rating_sweet numeric(2,1) not null,
-  rating_chill numeric(2,1) not null, rating_solid numeric(2,1) not null,
+  rating_overall numeric(2,1) not null, rating_sweet numeric(2,1),
+  rating_chill numeric(2,1), rating_solid numeric(2,1) not null,
   comment text, like_count int not null default 0, report_count int not null default 0,
   created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
   constraint chk_review_ratings check (

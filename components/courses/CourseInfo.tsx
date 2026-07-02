@@ -71,36 +71,46 @@ export function CourseInfo({
   }, [courseName, teacher]);
 
   const tabs = [
-    ["reviews", `課程評價${reviewCount != null ? `（${reviewCount} 則評價）` : ""}`],
-    ["grades", `成績分布${gradeCount != null ? `（${gradeCount} 個學期）` : ""}`],
+    { k: "reviews", main: "課程評價", count: reviewCount != null ? `（${reviewCount} 則評價）` : "" },
+    { k: "grades", main: "成績分布", count: gradeCount != null ? `（${gradeCount} 個學期）` : "" },
   ] as const;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        {tabs.map(([k, label]) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setTab(k)}
-            className={
-              "rounded-md px-3 py-1.5 text-sm transition-colors " +
-              (tab === k ? "bg-foreground text-background" : "bg-muted hover:opacity-80")
-            }
-          >
-            {label}
-          </button>
-        ))}
-        {/* 新增評論／回報成績按鈕：釘在頁籤列右上角，表單開啟時隱藏。 */}
+      {/* 手機版：頁籤一列、按鈕另起一列並置中；電腦版：同一列、按鈕靠右。 */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex items-center justify-center gap-3 sm:justify-start">
+          {tabs.map(({ k, main, count }) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setTab(k)}
+              className={
+                "rounded-md px-3 py-1.5 text-center text-sm transition-colors " +
+                (tab === k ? "bg-foreground text-background" : "bg-muted hover:opacity-80")
+              }
+            >
+              {/* 每段各自不換行；空間不足時整段「（幾則）」落到第二行，不會從中間斷字。 */}
+              <span className="whitespace-nowrap">{main}</span>
+              {count && (
+                <>
+                  <wbr />
+                  <span className="whitespace-nowrap">{count}</span>
+                </>
+              )}
+            </button>
+          ))}
+        </div>
+        {/* 新增評論／回報成績按鈕：表單開啟時隱藏。 */}
         {loggedIn &&
           (tab === "reviews"
             ? !reviewForm && (
-                <Button size="sm" variant="outline" className="ml-auto" onClick={() => setReviewForm({})}>
+                <Button size="sm" variant="outline" className="self-end sm:ml-auto sm:self-auto" onClick={() => setReviewForm({})}>
                   新增／編輯評論
                 </Button>
               )
             : !gradeForm && (
-                <Button size="sm" variant="outline" className="ml-auto" onClick={() => setGradeForm({})}>
+                <Button size="sm" variant="outline" className="self-end sm:ml-auto sm:self-auto" onClick={() => setGradeForm({})}>
                   回報 / 更新成績
                 </Button>
               ))}
@@ -198,7 +208,7 @@ function ReviewsTab({ courseName, teacher, loggedIn, onCount, form, setForm }: {
               </div>
             );
           })}
-          <span className="text-xs text-muted-foreground">· {aggregate.count} 則</span>
+          <span className="ml-auto text-xs text-muted-foreground">共 {aggregate.count} 則</span>
         </div>
       ) : (
         !loading && <p className="text-sm text-muted-foreground">還沒有評價，成為第一個評價的人吧。</p>
@@ -220,7 +230,7 @@ function ReviewsTab({ courseName, teacher, loggedIn, onCount, form, setForm }: {
                     整體 <StarRating value={rv.rating_overall} size={14} />
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    甜 {rv.rating_sweet} · 涼 {rv.rating_chill}
+                    甜 {rv.rating_sweet ?? "—"} · 涼 {rv.rating_chill ?? "—"}
                   </span>
                 </div>
                 {/* 讚放到右上角；自己的留言時放在鉛筆左邊，別人的留言就單獨靠右上。 */}
@@ -264,7 +274,7 @@ function ReviewsTab({ courseName, teacher, loggedIn, onCount, form, setForm }: {
 
 const emptyRatings = (): Record<AxisKey, number> => ({ overall: 0, sweet: 0, chill: 0 });
 const fillRatings = (r?: CourseReview): Record<AxisKey, number> =>
-  r ? { overall: r.rating_overall, sweet: r.rating_sweet, chill: r.rating_chill } : emptyRatings();
+  r ? { overall: r.rating_overall, sweet: r.rating_sweet ?? 0, chill: r.rating_chill ?? 0 } : emptyRatings();
 const defaultReviewSemester = (mineBySem: Map<string, CourseReview>) =>
   // 一人一課只留一則：已評過就預設載入該學期（編輯它），否則用最新學期。
   [...mineBySem.keys()][0] ?? SEMESTER_OPTIONS[0];
@@ -304,18 +314,29 @@ function ReviewForm({
   }, [semester, mineBySem]);
 
   const editing = mineBySem.has(semester);
-  const ready = AXES.every((a) => ratings[a.key] >= 0.5);
+  // 只有「整體」為必填；甜度／涼度選填（未給分時送 null，不列入平均）。
+  const ready = ratings.overall >= 0.5;
 
   async function submit() {
     setErr(null);
-    if (!ready) return setErr("三個項目都要給星等（至少半顆）。");
+    if (!ready) return setErr("請至少給「整體」評分（至少半顆星）。");
     setSaving(true);
     try {
       const r = await fetch("/api/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // 扎實 已從介面移除，但後端仍要求 solid；沿用整體評分填入以符合驗證。
-        body: JSON.stringify({ courseName, teacher, semester, ...ratings, solid: ratings.overall, comment }),
+        // 甜度／涼度未評分（0）時送 null，代表「未填」。
+        body: JSON.stringify({
+          courseName,
+          teacher,
+          semester,
+          overall: ratings.overall,
+          sweet: ratings.sweet >= 0.5 ? ratings.sweet : null,
+          chill: ratings.chill >= 0.5 ? ratings.chill : null,
+          solid: ratings.overall,
+          comment,
+        }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => null);
@@ -366,14 +387,21 @@ function ReviewForm({
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {AXES.map((a) => (
           <div key={a.key} className="space-y-1">
-            <p className="text-xs text-muted-foreground">{a.label}</p>
+            <p className="text-xs text-muted-foreground">
+              {a.label}
+              {a.key === "overall" ? (
+                <span className="text-[hsl(var(--warning))]"> *</span>
+              ) : (
+                <span className="text-muted-foreground/60">（選填）</span>
+              )}
+            </p>
             <StarRatingInput value={ratings[a.key]} onChange={(v) => setRatings((r) => ({ ...r, [a.key]: v }))} size={24} />
           </div>
         ))}
       </div>
       <Textarea placeholder="留下你的修課心得（選填）" value={comment} onChange={(e) => setComment(e.target.value)} maxLength={500} />
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {err && <p className="mr-auto text-sm text-[hsl(var(--warning))]">{err}</p>}
+        {err && <p className="w-full text-sm text-[hsl(var(--warning))]">{err}</p>}
         {editing && (
           <Button
             size="sm"

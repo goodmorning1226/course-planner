@@ -5,8 +5,9 @@ import { MyReviews } from "@/components/reviews/MyReviews";
 import { MyGradeReports } from "@/components/reviews/MyGradeReports";
 
 // /my-reviews content: two tabs — the user's own 課程評價 and 成績分布.
-export function MyContributions() {
-  const [tab, setTab] = useState<"reviews" | "grades">("reviews");
+// initialTab 由 /my-reviews 帶入，讓從修課情報返回時能回到原本的頁籤。
+export function MyContributions({ initialTab = "reviews" }: { initialTab?: "reviews" | "grades" }) {
+  const [tab, setTab] = useState<"reviews" | "grades">(initialTab);
   const tabs = [
     ["reviews", "課程評價"],
     ["grades", "成績分布"],

@@ -40,7 +40,7 @@ export function Modal({
       className="fixed inset-0 z-50 overflow-y-auto bg-black/50"
       onClick={onClose}
     >
-      <div className="flex min-h-full items-start justify-center p-4 sm:items-center">
+      <div className="flex min-h-full items-center justify-center p-4">
         <div
           className={cn(
             "my-6 w-full max-w-2xl rounded-lg border border-border bg-background p-5 shadow-lg sm:p-6",
