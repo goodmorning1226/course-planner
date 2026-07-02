@@ -48,10 +48,10 @@ const BUCKET_KEYS: (keyof LegacyBuckets)[] = [
 const EPS = 0.01;
 /** How far a distribution may sum from 100 and still count as "complete/齊". */
 const COMPLETE_TOL = 1.5;
-/** Two reports at the SAME grade disagreeing by more than this = conflict. */
-const SPREAD_TOL = 5;
-/** Slack before a sum/gap is called impossible (rounding-tolerant). */
-const CONFLICT_TOL = 3;
+// Differences within this % are treated as the same value — averaged (median)
+// and NOT flagged as a conflict. Only disagreements LARGER than this split.
+const SPREAD_TOL = 5; // two reports at the SAME grade
+const CONFLICT_TOL = 5; // a cross-grade gap/sum being "impossible"
 
 // Aggregate repeated reports of the SAME quantity. Median (not mean) so one
 // wrong entry can't skew it; and unlike mode it still works when honest reports
@@ -338,43 +338,40 @@ export function groupReports(reports: RawReport[]): RawReport[][] {
   return groups;
 }
 
-/** Reconstruct one consistent group into a bar, placing any leftover mass. */
-function finalizeBar(reports: RawReport[]): Bar {
+/**
+ * Reconstruct one consistent group into a bar, placing any leftover mass as a
+ * 更高/更低/中間(未細分) lump. Returns null when the leftover CAN'T be positioned
+ * (data missing 以上/以下 and >1 open region) — such incomplete data is dropped,
+ * never shown as 無資料.
+ */
+function finalizeBar(reports: RawReport[]): Bar | null {
   const rec = reconstruct(reports);
   const segments = rec.segments;
-  if (segments.length > 0) {
-    const leftover = 100 - segments.reduce((a, s) => a + s.pct, 0);
-    if (leftover > UNCERTAIN_MIN) {
-      const top = rec.reported[0];
-      const bottom = rec.reported[rec.reported.length - 1];
-      const topOpen = top > 0 && !rec.aboveLumpPresent;
-      const botOpen = bottom < GRADE_ORDER.length - 1 && !rec.belowLumpPresent;
-      const openCount = (topOpen ? 1 : 0) + (botOpen ? 1 : 0) + rec.openGaps.length;
-      if (openCount === 1 && topOpen) {
-        segments.unshift({ label: "更高 (未細分)", pct: leftover, known: false });
-      } else if (openCount === 1 && botOpen) {
-        segments.push({ label: "更低 (未細分)", pct: leftover, known: false });
-      } else if (openCount === 1 && rec.openGaps.length === 1) {
-        const upper = GRADE_ORDER[rec.openGaps[0]];
-        const idx = segments.findIndex((s) => s.known && s.label === upper);
-        segments.splice(idx + 1, 0, { label: "中間 (未細分)", pct: leftover, known: false });
-      } else if (openCount > 1) {
-        // 未知量橫跨多個開放區段，各自大小無法得知 → 平均分配寬度，每個開放
-        // 位置各放一個「?」(無資料) 格，畫在它真正所在的位置（上方／中間／下方）。
-        const each = leftover / openCount;
-        if (botOpen) segments.push({ label: "無資料", pct: each, known: false });
-        // 由最下方的 gap 往上插入，findIndex 才不會被前面插入影響。
-        for (let g = rec.openGaps.length - 1; g >= 0; g--) {
-          const upper = GRADE_ORDER[rec.openGaps[g]];
-          const idx = segments.findIndex((s) => s.known && s.label === upper);
-          if (idx >= 0) segments.splice(idx + 1, 0, { label: "無資料", pct: each, known: false });
-        }
-        if (topOpen) segments.unshift({ label: "無資料", pct: each, known: false });
-      } else {
-        segments.push({ label: "無資料", pct: leftover, known: false });
-      }
+  if (segments.length === 0) return null;
+
+  const leftover = 100 - segments.reduce((a, s) => a + s.pct, 0);
+  if (leftover > UNCERTAIN_MIN) {
+    const top = rec.reported[0];
+    const bottom = rec.reported[rec.reported.length - 1];
+    const topOpen = top > 0 && !rec.aboveLumpPresent;
+    const botOpen = bottom < GRADE_ORDER.length - 1 && !rec.belowLumpPresent;
+    const openCount = (topOpen ? 1 : 0) + (botOpen ? 1 : 0) + rec.openGaps.length;
+    if (openCount === 1 && topOpen) {
+      segments.unshift({ label: "更高 (未細分)", pct: leftover, known: false });
+    } else if (openCount === 1 && botOpen) {
+      segments.push({ label: "更低 (未細分)", pct: leftover, known: false });
+    } else if (openCount === 1 && rec.openGaps.length === 1) {
+      const upper = GRADE_ORDER[rec.openGaps[0]];
+      const idx = segments.findIndex((s) => s.known && s.label === upper);
+      segments.splice(idx + 1, 0, { label: "中間 (未細分)", pct: leftover, known: false });
+    } else {
+      // 剩餘量無法定位（缺以上/以下、且非單一開放區）→ 資料不完整，不顯示這條。
+      return null;
     }
   }
+  // 容差內的小差異（四捨五入/略微不一致）→ 等比正規化到 100%，視為沒問題。
+  const total = segments.reduce((a, s) => a + s.pct, 0);
+  if (total > 0) for (const s of segments) s.pct = (s.pct * 100) / total;
   return { segments, pinned: rec.pinned };
 }
 
@@ -398,6 +395,6 @@ export function buildSemester(userReports: RawReport[], legacy?: LegacyBuckets |
   }
   const bars = groupReports([...legReports, ...userReports])
     .map(finalizeBar)
-    .filter((b) => b.segments.length > 0);
+    .filter((b): b is Bar => b !== null && b.segments.length > 0);
   return { bars, reportCount: userReports.length, hasLegacy };
 }

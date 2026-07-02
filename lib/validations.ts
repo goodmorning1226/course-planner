@@ -185,6 +185,15 @@ export const gradeReportBodySchema = z
   .refine((v) => !(v.pivot === "F" && (v.belowPct ?? 0) > 0), {
     message: "F 之下沒有更低等第，「低於你」不可填。",
     path: ["belowPct"],
+  })
+  // 以上/以下必填（A+ 免以上、F 免以下）— epo 一定同時顯示三者。
+  .refine((v) => v.pivot === "A+" || v.abovePct != null, {
+    message: "請填「高於你」的比例。",
+    path: ["abovePct"],
+  })
+  .refine((v) => v.pivot === "F" || v.belowPct != null, {
+    message: "請填「低於你」的比例。",
+    path: ["belowPct"],
   });
 export type GradeReportBody = z.infer<typeof gradeReportBodySchema>;
 

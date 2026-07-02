@@ -52,16 +52,13 @@ function tierIndex(label: string): number {
   return 1;
 }
 
-// A segment is one of three kinds:
+// A segment is one of two kinds now:
 //   · known grade            → tier colour, grade + % written INSIDE the box.
-//   · 更高/更低/中間 (未細分) → neutral box, labelled by a BRACKET above the bar.
-//   · 無資料 (grade unknown)  → neutral box with a "?" inside.
-const isNoData = (seg: Segment) => !seg.known && seg.label === "無資料";
-const isBracketed = (seg: Segment) => !seg.known && seg.label !== "無資料";
+//   · 更高/更低/中間 (未細分) → neutral grey box with "?" + % inside, like a grade.
 /** Box fill colour. */
 function segFill(seg: Segment): string {
   if (seg.known) return (GRADE_BAR[seg.label[0]] ?? GRADE_BAR.F)[tierIndex(seg.label)];
-  return isNoData(seg) ? "bg-gray-100" : "bg-gray-200";
+  return "bg-gray-200";
 }
 
 export function GradeReports({
@@ -151,51 +148,37 @@ export function GradeReports({
                 )}
               </div>
 
-              {/* 每個一致的回報群組一條 bar（衝突 → 多條上下排列）。示意圖式：
-                  確定等第寫在框裡；更高/更低/中間用括號標在線外；無等第處打「?」。 */}
-              {s.bars.map((bar, bi) => (
-                <div key={bi} className="space-y-0.5">
-                  {/* 線外括號：與下方 bar 用相同寬度對齊，只有「未細分」段落顯示。 */}
-                  <div className="flex h-6 w-full items-end gap-px">
-                    {bar.segments.map((seg, i) =>
-                      isBracketed(seg) ? (
-                        <div key={i} style={{ width: `${seg.pct}%` }} className="flex min-w-0 flex-col items-center">
-                          <span className="whitespace-nowrap text-[11px] font-medium leading-none text-muted-foreground">
-                            {seg.pct.toFixed(0)}%
-                          </span>
-                          <span className="mt-0.5 h-1.5 w-full rounded-t-[3px] border-x border-t border-muted-foreground/40" />
-                        </div>
-                      ) : (
-                        <div key={i} style={{ width: `${seg.pct}%` }} />
-                      ),
-                    )}
-                  </div>
-
-                  {/* bar 本體：確定等第框內寫等第＋%，無資料框內打「?」。 */}
-                  <div className="flex h-9 w-full gap-px overflow-hidden rounded bg-muted">
+              {/* 每個一致的回報群組一條 bar（衝突 → 多條上下排列）。等第＋% 並排寫在
+                  框內。每格有最小寬度確保文字完整；當多個小比例撐到最小寬度、空間
+                  不夠時，較大的比例會等比例壓縮讓出空間（不使用捲動）。 */}
+              <div className="space-y-1">
+                {s.bars.map((bar, bi) => (
+                  <div key={bi} className="flex h-9 w-full gap-px overflow-hidden rounded bg-muted sm:h-8">
                     {bar.segments.map((seg, i) => (
                       <div
                         key={i}
-                        style={{ width: `${seg.pct}%` }}
+                        style={{ flexBasis: `${seg.pct}%` }}
                         title={`${seg.label} ${seg.pct.toFixed(1)}%`}
                         className={
-                          "flex items-center justify-center overflow-hidden px-0.5 text-center leading-none " +
+                          "flex min-w-[2.4rem] items-center justify-center overflow-hidden px-1 leading-none sm:min-w-[3rem] " +
                           segFill(seg)
                         }
                       >
-                        {seg.known ? (
-                          <span className="flex flex-col items-center gap-0.5 text-[11px] font-semibold text-gray-900">
-                            <span>{seg.label}</span>
-                            <span className="tabular-nums">{seg.pct.toFixed(0)}%</span>
-                          </span>
-                        ) : (
-                          <span className="text-sm font-semibold text-muted-foreground">?</span>
-                        )}
+                        {/* 手機版：比例在等第下方（省寬度）；電腦版：比例在等第右邊。 */}
+                        <span
+                          className={
+                            "flex flex-col items-center gap-0.5 whitespace-nowrap text-[11px] font-semibold sm:flex-row sm:gap-1 " +
+                            (seg.known ? "text-gray-900" : "text-gray-500")
+                          }
+                        >
+                          <span>{seg.known ? seg.label : "?"}</span>
+                          <span className="tabular-nums">{seg.pct.toFixed(0)}%</span>
+                        </span>
                       </div>
                     ))}
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           ))}
         </div>
@@ -257,13 +240,15 @@ function ReportForm({
     if (sameN == null || Number.isNaN(sameN) || sameN < 0 || sameN > 100) {
       return setErr("「與您成績相同的比例」為必填。");
     }
-    // 只填中間一格時不必湊 100；填了兩格以上才要求加總為 100。
-    const filledCount = [below, same, above].filter((x) => x !== "").length;
-    if (filledCount >= 2) {
-      const total = (Number(below) || 0) + sameN + (Number(above) || 0);
-      if (Math.abs(total - 100) > 0.1) {
-        return setErr("三個比例加起來需等於 100%。");
-      }
+    // 以上/以下改為必填（A+ 無以上、F 無以下除外）。
+    const aboveN = aboveLocked ? 0 : num(above);
+    const belowN = belowLocked ? 0 : num(below);
+    if (!aboveLocked && aboveN == null) return setErr("「比您成績高的比例」為必填。");
+    if (!belowLocked && belowN == null) return setErr("「比您成績低的比例」為必填。");
+    // 三者（扣掉不適用的邊界）需加總為 100%。
+    const total = sameN + (aboveN ?? 0) + (belowN ?? 0);
+    if (Math.abs(total - 100) > 0.1) {
+      return setErr("三個比例加起來需等於 100%。");
     }
     setSaving(true);
     try {
@@ -353,17 +338,19 @@ function ReportForm({
 
       <div className="flex flex-wrap items-end gap-6">
         <PctField
-          label={belowLocked ? "比您成績低的比例（F 為最低）" : "比您成績低的比例（選填）"}
+          label={belowLocked ? "比您成績低的比例（F 為最低）" : "比您成績低的比例（必填）"}
           value={belowLocked ? "" : below}
           onChange={setBelow}
           disabled={belowLocked}
+          required={!belowLocked}
         />
         <PctField label="與您成績相同的比例（必填）" value={same} onChange={setSame} required />
         <PctField
-          label={aboveLocked ? "比您成績高的比例（A+ 為最高）" : "比您成績高的比例（選填）"}
+          label={aboveLocked ? "比您成績高的比例（A+ 為最高）" : "比您成績高的比例（必填）"}
           value={aboveLocked ? "" : above}
           onChange={setAbove}
           disabled={aboveLocked}
+          required={!aboveLocked}
         />
       </div>
 
