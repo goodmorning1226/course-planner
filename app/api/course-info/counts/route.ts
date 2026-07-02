@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createPublicServerClient } from "@/lib/supabase/server";
+import { createPublicServerClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { courseInfoQuerySchema } from "@/lib/validations";
 import { matchKey } from "@/lib/reviews/key";
 import { rateLimit, clientKey, RATE_LIMITS } from "@/lib/rate-limit";
@@ -10,6 +10,11 @@ import { z } from "zod";
 //   GET  ?name=&teacher=         → { reviews, grades }                 (one course)
 //   POST { pairs:[{name,teacher}] } → { counts: { matchKey: {reviews,grades} } }
 // Used by the course card (batch) and the 修課情報 tabs (single). Public.
+//
+// `grades` = number of DISTINCT semesters shown = union of imported
+// grade_distributions semesters AND first-hand grade_reports semesters, so a
+// semester that only has a user report still counts. grade_reports is owner-only
+// under RLS, so the (PII-free) semester read uses the service role.
 
 export async function GET(req: Request) {
   const rl = rateLimit(clientKey(req, "reviews-read"), RATE_LIMITS.reviewRead.limit, RATE_LIMITS.reviewRead.windowMs);
@@ -22,11 +27,16 @@ export async function GET(req: Request) {
 
   try {
     const pub = createPublicServerClient();
-    const [rv, gd] = await Promise.all([
+    const svc = createServiceRoleClient();
+    const [rv, gd, gr] = await Promise.all([
       pub.from("course_reviews").select("*", { count: "exact", head: true }).eq("match_key", key),
-      pub.from("grade_distributions").select("*", { count: "exact", head: true }).eq("match_key", key),
+      pub.from("grade_distributions").select("semester").eq("match_key", key),
+      svc.from("grade_reports").select("semester").eq("match_key", key),
     ]);
-    return NextResponse.json({ reviews: rv.count ?? 0, grades: gd.count ?? 0 });
+    const sems = new Set<string>();
+    for (const r of gd.data ?? []) sems.add((r as { semester: string }).semester);
+    for (const r of gr.data ?? []) sems.add((r as { semester: string }).semester);
+    return NextResponse.json({ reviews: rv.count ?? 0, grades: sems.size });
   } catch (err) {
     console.error("[/api/course-info/counts GET] failed:", err);
     return apiError("internal_error", "伺服器發生錯誤，請稍後再試。");
@@ -52,17 +62,20 @@ export async function POST(req: Request) {
 
   try {
     const pub = createPublicServerClient();
-    const [rv, gd] = await Promise.all([
+    const svc = createServiceRoleClient();
+    const [rv, gd, gr] = await Promise.all([
       pub.from("course_reviews").select("match_key, rating_overall").in("match_key", keys),
-      pub.from("grade_distributions").select("match_key").in("match_key", keys),
+      pub.from("grade_distributions").select("match_key, semester").in("match_key", keys),
+      svc.from("grade_reports").select("match_key, semester").in("match_key", keys),
     ]);
     type Count = { reviews: number; grades: number; rating: number | null };
     const counts: Record<string, Count> = {};
-    // Running rating sum per key → averaged at the end.
-    const ratingSum: Record<string, number> = {};
+    const ratingSum: Record<string, number> = {}; // running rating sum → averaged
+    const semsByKey: Record<string, Set<string>> = {}; // distinct grade semesters
     for (const k of keys) {
       counts[k] = { reviews: 0, grades: 0, rating: null };
       ratingSum[k] = 0;
+      semsByKey[k] = new Set();
     }
     for (const r of rv.data ?? []) {
       const row = r as { match_key: string; rating_overall: number | null };
@@ -72,11 +85,13 @@ export async function POST(req: Request) {
         ratingSum[row.match_key] += Number(row.rating_overall) || 0;
       }
     }
-    for (const g of gd.data ?? []) {
-      const c = counts[(g as { match_key: string }).match_key];
-      if (c) c.grades++;
+    // grades = distinct semesters across imported distributions + user reports.
+    for (const g of [...(gd.data ?? []), ...(gr.data ?? [])]) {
+      const row = g as { match_key: string; semester: string };
+      semsByKey[row.match_key]?.add(row.semester);
     }
     for (const k of keys) {
+      counts[k].grades = semsByKey[k].size;
       if (counts[k].reviews > 0) counts[k].rating = ratingSum[k] / counts[k].reviews;
     }
     return NextResponse.json({ counts });

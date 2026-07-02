@@ -300,20 +300,25 @@ function ReviewForm({
     () => new Map(reviews.filter((r) => r.mine).map((r) => [r.semester, r])),
     [reviews]
   );
-  const [semester, setSemester] = useState(initialSemester ?? defaultReviewSemester(mineBySem));
-  const [ratings, setRatings] = useState<Record<AxisKey, number>>(() => fillRatings(mineBySem.get(semester)));
-  const [comment, setComment] = useState(mineBySem.get(semester)?.comment ?? "");
+  // 一人一課只留一筆評論。載入現有那筆；切學期只是把這則評論「移到」另一個學期，
+  // 不清空已填的評分/留言。
+  const existing = [...mineBySem.entries()][0]; // [semester, review] | undefined
+  const mine = existing?.[1];
+  const [semester, setSemester] = useState(initialSemester ?? existing?.[0] ?? defaultReviewSemester(mineBySem));
+  const [ratings, setRatings] = useState<Record<AxisKey, number>>(() => fillRatings(mine));
+  const [comment, setComment] = useState(mine?.comment ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Switching semester loads that semester's own review (or blanks).
-  useEffect(() => {
-    const mine = mineBySem.get(semester);
-    setRatings(fillRatings(mine));
-    setComment(mine?.comment ?? "");
-  }, [semester, mineBySem]);
-
-  const editing = mineBySem.has(semester);
+  const editing = !!mine;
+  // 編輯既有評論又切學期 → 先確認（與成績分布一致）。
+  function changeSemester(next: string) {
+    if (next === semester) return;
+    if (editing && existing && semester === existing[0] && next !== existing[0]) {
+      if (!window.confirm(`你已評論過（${existing[0]}）。改成 ${next} 會把這則評論改到新的修課學期，確定要改嗎？`)) return;
+    }
+    setSemester(next);
+  }
   // 只有「整體」為必填；甜度／涼度選填（未給分時送 null，不列入平均）。
   const ready = ratings.overall >= 0.5;
 
@@ -374,7 +379,7 @@ function ReviewForm({
       <div className="space-y-4">
       <div className="flex items-center gap-2 text-sm">
         <span className="text-muted-foreground">修課學期</span>
-        <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
+        <Select value={semester} onChange={(e) => changeSemester(e.target.value)}>
           {SEMESTER_OPTIONS.map((s) => (
             <option key={s} value={s}>
               {s}

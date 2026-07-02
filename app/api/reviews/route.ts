@@ -4,6 +4,7 @@ import { reviewBodySchema } from "@/lib/validations";
 import { courseInfoQuerySchema } from "@/lib/validations";
 import { matchKey } from "@/lib/reviews/key";
 import { logContent } from "@/lib/audit";
+import { refreshInfoCount } from "@/lib/courses/infoCount";
 import { rateLimit, clientKey, RATE_LIMITS } from "@/lib/rate-limit";
 import { apiError, rateLimited } from "@/lib/api-error";
 import type { CourseReview, ReviewAggregate } from "@/lib/courses/types";
@@ -125,6 +126,7 @@ export async function POST(req: Request) {
       { onConflict: "user_id,match_key" }
     );
     if (error) throw error;
+    await refreshInfoCount(createServiceRoleClient(), b.courseName, b.teacher ?? null);
     await logContent({
       kind: "review",
       action: existing ? "edit" : "add",
@@ -161,7 +163,8 @@ export async function DELETE(req: Request) {
       .maybeSingle();
     const { error } = await supabase.from("course_reviews").delete().eq("id", reviewId); // RLS: own only
     if (error) throw error;
-    if (rv)
+    if (rv) {
+      await refreshInfoCount(createServiceRoleClient(), rv.course_name as string, (rv.teacher as string) ?? null);
       await logContent({
         kind: "review",
         action: "delete",
@@ -170,6 +173,7 @@ export async function DELETE(req: Request) {
         semester: rv.semester as string,
         userId: user.id,
       });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[/api/reviews DELETE] failed:", err);

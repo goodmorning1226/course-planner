@@ -179,8 +179,11 @@ export async function GET(req: Request) {
     // Course-level filters: 開課地點 exact-label list (OR).
     if (buildings?.length) cq = cq.in("building_or_college", buildings);
     if (teacher) cq = cq.ilike("teacher", `%${teacher}%`);
-    // Soft-delete: 停開 courses stay searchable (marked) by default; hide on request.
-    if (hideRemoved === "true") cq = cq.eq("status", "active");
+    // Soft-delete: 停開 courses are HIDDEN in browsing. They still return when a
+    // specific id whitelist is given (timetable-pinned fetch) so a 停開 course you
+    // saved keeps showing; favorites/timetable pages use their own endpoints.
+    // `hideRemoved=false` can force-include them in a normal search if ever needed.
+    if (!idList?.length && hideRemoved !== "false") cq = cq.eq("status", "active");
 
     // (2) Free-text search OR group.
     if (q) {
@@ -199,9 +202,12 @@ export async function GET(req: Request) {
 
     // Stable base ordering + paginate (fetch limit + 1 to detect "more").
     cq = cq
-      .order("course_name", { ascending: true })
-      .order("id", { ascending: true })
       .range(offset, offset + limit);
+    // No text search (browse / filter only) → surface courses with more 修課情報
+    // first. With a query, relevance ordering takes over (applied to the page).
+    // Timetable-pinned courses are floated above these client-side.
+    if (!q) cq = cq.order("info_count", { ascending: false });
+    cq = cq.order("course_name", { ascending: true }).order("id", { ascending: true });
 
     const { data: rawRows, error, count: total } = await cq;
     if (error) throw error;

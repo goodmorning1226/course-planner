@@ -4,6 +4,7 @@ import { courseInfoQuerySchema, gradeReportBodySchema, gradeReportDeleteSchema }
 import { matchKey } from "@/lib/reviews/key";
 import { buildSemester, reconstruct, groupReports, legacyToReports, type RawReport, type LegacyBuckets } from "@/lib/grades/reports";
 import { logContent } from "@/lib/audit";
+import { refreshInfoCount } from "@/lib/courses/infoCount";
 import { rateLimit, clientKey, RATE_LIMITS } from "@/lib/rate-limit";
 import { apiError, rateLimited } from "@/lib/api-error";
 
@@ -178,6 +179,7 @@ export async function POST(req: Request) {
       ? await svc.from("grade_reports").update(row).eq("id", existing.id)
       : await svc.from("grade_reports").insert(row);
     if (error) throw error;
+    await refreshInfoCount(svc, b.courseName, b.teacher ?? null);
     await logContent({
       kind: "grade",
       action: existing ? "edit" : "add",
@@ -217,6 +219,7 @@ export async function DELETE(req: Request) {
       .eq("match_key", key)
       .eq("semester", b.semester);
     if (error) throw error;
+    await refreshInfoCount(svc, b.courseName, b.teacher ?? null);
     await logContent({
       kind: "grade",
       action: "delete",
