@@ -6,7 +6,7 @@
 // reported grade is a solid bar; still-unknown mass shows as 未細分/不確定 bands
 // that shrink as more people report.
 
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/Select";
@@ -14,7 +14,6 @@ import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/input";
 import { SEMESTER_OPTIONS } from "@/lib/reviews/key";
 import { GRADE_ORDER, type Segment, type Bar } from "@/lib/grades/reports";
-import { PencilIcon } from "@/components/icons/PencilIcon";
 
 interface SemesterDist {
   semester: string;
@@ -99,6 +98,19 @@ export function GradeReports({
     load();
   }, [load]);
 
+  // 系統已經有資料的等第（每學期）：分布圖中所有 known 區塊的等第。回報時這些等第
+  // 不能再填（已知該等第比例，重複回報沒意義）。memo 以維持 prop identity 穩定。
+  const takenGrades = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const s of semesters) {
+      const set = new Set<string>();
+      for (const bar of s.bars)
+        for (const seg of bar.segments) if (seg.known) set.add(seg.label);
+      map[s.semester] = [...set];
+    }
+    return map;
+  }, [semesters]);
+
   return (
     <div className="space-y-4">
       {/* 觸發按鈕在 CourseInfo 頁籤列；表單面板／未登入提示放最上面，和「新增評論」一致。 */}
@@ -108,6 +120,7 @@ export function GradeReports({
           teacher={teacher}
           initialSemester={form.initial}
           myReports={myReports}
+          takenGrades={takenGrades}
           onClose={() => setForm(null)}
           onSaved={() => {
             setForm(null);
@@ -134,18 +147,6 @@ export function GradeReports({
             <div key={s.semester} className="space-y-2">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.semester}</span>
-                {/* 只有使用者回報過的學期才顯示編輯圖標，就放在學期旁邊。 */}
-                {loggedIn && myReports[s.semester] && (
-                  <button
-                    type="button"
-                    onClick={() => setForm({ initial: s.semester })}
-                    aria-label="編輯這學期的回報"
-                    title="編輯我的回報"
-                    className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <PencilIcon className="h-4 w-4" />
-                  </button>
-                )}
               </div>
 
               {/* 每個一致的回報群組一條 bar（衝突 → 多條上下排列）。等第＋% 並排寫在
@@ -158,9 +159,10 @@ export function GradeReports({
                       <div
                         key={i}
                         style={{ flexBasis: `${seg.pct}%` }}
+                        // 電腦版用滑鼠 hover 由 title 顯示完整比例（手機不需要）。
                         title={`${seg.label} ${seg.pct.toFixed(1)}%`}
                         className={
-                          "flex min-w-[2.4rem] items-center justify-center overflow-hidden px-1 leading-none sm:min-w-[3rem] " +
+                          "flex min-w-[1.2rem] items-center justify-center overflow-hidden px-1 leading-none sm:min-w-[1.5rem] " +
                           segFill(seg)
                         }
                       >
@@ -172,7 +174,16 @@ export function GradeReports({
                           }
                         >
                           <span>{seg.known ? seg.label : "?"}</span>
-                          <span className="tabular-nums">{seg.pct.toFixed(0)}%</span>
+                          {/* 電腦版：格子太小（比例<5%）只顯示等第，% 藏起來，滑鼠 hover
+                              由 title 顯示完整比例。手機版直向堆疊有空間，照常顯示。 */}
+                          <span
+                            className={
+                              "tabular-nums" + (seg.pct < 5 ? " sm:hidden" : "")
+                            }
+                          >
+                            {/* 10% 以上顯示到小數點後一位；未滿 10% 取整數。 */}
+                            {seg.pct.toFixed(seg.pct >= 10 ? 1 : 0)}%
+                          </span>
                         </span>
                       </div>
                     ))}
@@ -194,6 +205,7 @@ export function ReportForm({
   teacher,
   initialSemester,
   myReports,
+  takenGrades,
   onClose,
   onSaved,
   inline = false,
@@ -202,6 +214,8 @@ export function ReportForm({
   teacher: string | null;
   initialSemester?: string;
   myReports: Record<string, MyReport>;
+  /** 每學期系統已有資料的等第 → 不能重複回報。缺省時不限制（例如編輯既有回報）。 */
+  takenGrades?: Record<string, string[]>;
   onClose: () => void;
   onSaved: () => void;
   // inline=true：不用彈出視窗，直接在原位展開表單（用於「我的評論」成績分布頁）。
@@ -211,8 +225,14 @@ export function ReportForm({
   // 已填的等第與比例——換學期只是把這筆「移到」另一個學期。
   const existing = Object.entries(myReports)[0]; // [semester, MyReport] | undefined
   const mine = existing?.[1];
-  const [semester, setSemester] = useState(initialSemester ?? existing?.[0] ?? SEMESTER_OPTIONS[0]);
-  const [pivot, setPivot] = useState(mine?.pivot ?? "A");
+  const initialSem = initialSemester ?? existing?.[0] ?? SEMESTER_OPTIONS[0];
+  const [semester, setSemester] = useState(initialSem);
+  const [pivot, setPivot] = useState(() => {
+    if (mine?.pivot) return mine.pivot;
+    // 預設挑第一個「系統還沒有資料」的等第，避免一開啟就選到不能填的等第。
+    const taken = new Set(takenGrades?.[initialSem] ?? []);
+    return GRADE_ORDER.find((g) => !taken.has(g)) ?? GRADE_ORDER[0];
+  });
   const [same, setSame] = useState(mine?.samePct != null ? String(mine.samePct) : "");
   const [above, setAbove] = useState(mine?.abovePct != null ? String(mine.abovePct) : "");
   const [below, setBelow] = useState(mine?.belowPct != null ? String(mine.belowPct) : "");
@@ -220,6 +240,12 @@ export function ReportForm({
   const [err, setErr] = useState<string | null>(null);
 
   const editing = !!mine;
+  // 此學期系統已占用（已有資料）的等第 → 不能重複回報。排除自己這學期的既有回報
+  // （那筆本來就是你自己的，可以繼續選、編輯）。
+  const ownPivotHere = existing?.[0] === semester ? mine?.pivot : undefined;
+  const disabledGrades = new Set(
+    (takenGrades?.[semester] ?? []).filter((g) => g !== ownPivotHere),
+  );
   // A+ has nothing above it; F has nothing below it — lock (and clear) those.
   const aboveLocked = pivot === "A+";
   const belowLocked = pivot === "F";
@@ -230,16 +256,19 @@ export function ReportForm({
 
   async function submit(force = false) {
     setErr(null);
-    const num = (x: string) => (x === "" ? null : Number(x));
-    const sameN = num(same);
-    if (sameN == null || Number.isNaN(sameN) || sameN < 0 || sameN > 100) {
-      return setErr("「與您成績相同的比例」為必填。");
+    // 系統已有該等第的資料 → 不能重複回報。
+    if (disabledGrades.has(pivot)) {
+      return setErr(`${semester} 的 ${pivot} 已經有資料了，不能重複回報。`);
     }
+    const num = (x: string) => (x === "" ? null : Number(x));
     // 以上/以下改為必填（A+ 無以上、F 無以下除外）。
+    const sameN = num(same);
     const aboveN = aboveLocked ? 0 : num(above);
     const belowN = belowLocked ? 0 : num(below);
-    if (!aboveLocked && aboveN == null) return setErr("「比您成績高的比例」為必填。");
-    if (!belowLocked && belowN == null) return setErr("「比您成績低的比例」為必填。");
+    const sameBad = sameN == null || Number.isNaN(sameN) || sameN < 0 || sameN > 100;
+    if (sameBad || (!aboveLocked && aboveN == null) || (!belowLocked && belowN == null)) {
+      return setErr("三個比例都要填。");
+    }
     // 三者（扣掉不適用的邊界）需加總為 100%。
     const total = sameN + (aboveN ?? 0) + (belowN ?? 0);
     if (Math.abs(total - 100) > 0.1) {
@@ -307,8 +336,10 @@ export function ReportForm({
       <span className="text-muted-foreground">你的等第</span>
       <Select value={pivot} onChange={(e) => setPivot(e.target.value)}>
         {GRADE_ORDER.map((g) => (
-          <option key={g} value={g}>
+          // 系統已有資料的等第停用，不能重複回報。
+          <option key={g} value={g} disabled={disabledGrades.has(g)}>
             {g}
+            {disabledGrades.has(g) ? "（已有資料）" : ""}
           </option>
         ))}
       </Select>
@@ -347,19 +378,17 @@ export function ReportForm({
       {/* 手機版：三格縮短並排同一列（grid 三欄）；電腦版維持較寬的排列。 */}
       <div className="grid grid-cols-3 items-end gap-2 sm:flex sm:flex-wrap sm:gap-6">
         <PctField
-          label={belowLocked ? "比您成績低的（F 最低）" : "比您成績低的（必填）"}
+          label={belowLocked ? "比您成績低的（F 最低）" : "比您成績低的"}
           value={belowLocked ? "" : below}
           onChange={setBelow}
           disabled={belowLocked}
-          required={!belowLocked}
         />
-        <PctField label="與您成績相同的（必填）" value={same} onChange={setSame} required />
+        <PctField label="與您成績相同的" value={same} onChange={setSame} />
         <PctField
-          label={aboveLocked ? "比您成績高的（A+ 最高）" : "比您成績高的（必填）"}
+          label={aboveLocked ? "比您成績高的（A+ 最高）" : "比您成績高的"}
           value={aboveLocked ? "" : above}
           onChange={setAbove}
           disabled={aboveLocked}
-          required={!aboveLocked}
         />
       </div>
 
@@ -403,21 +432,16 @@ function PctField({
   label,
   value,
   onChange,
-  required,
   disabled,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  required?: boolean;
   disabled?: boolean;
 }) {
   return (
     <label className={"flex w-full flex-col gap-1 text-xs sm:w-44 sm:whitespace-nowrap" + (disabled ? " opacity-50" : "")}>
-      <span className="text-muted-foreground">
-        {label}
-        {required && <span className="text-[hsl(var(--warning))]"> *</span>}
-      </span>
+      <span className="text-muted-foreground">{label}</span>
       <div className="relative">
         <Input
           type="number"
