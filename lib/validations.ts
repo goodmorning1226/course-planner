@@ -174,6 +174,8 @@ export const gradeReportBodySchema = z
     samePct: REQUIRED_PERCENT, // 與你同等第的比例（唯一精確值）
     abovePct: REQUIRED_PERCENT.optional().nullable(), // 高於你的比例
     belowPct: REQUIRED_PERCENT.optional().nullable(), // 低於你的比例
+    // 使用者已確認「與現有資料衝突仍要送出」→ 略過衝突提示、照常保存。
+    force: z.boolean().optional(),
   })
   // A+ has nothing above it; F has nothing below it — those lumps can't exist.
   .refine((v) => !(v.pivot === "A+" && (v.abovePct ?? 0) > 0), {

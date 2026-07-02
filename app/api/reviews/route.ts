@@ -105,9 +105,9 @@ export async function POST(req: Request) {
       .select("id")
       .eq("user_id", user.id)
       .eq("match_key", key)
-      .eq("semester", b.semester)
       .maybeSingle();
-    // RLS enforces auth.uid() = user_id; upsert keeps one row per course+semester.
+    // RLS enforces auth.uid() = user_id; upsert keeps ONE row per course (any
+    // resubmit — even a different semester — replaces the user's single review).
     const { error } = await supabase.from("course_reviews").upsert(
       {
         user_id: user.id,
@@ -121,7 +121,7 @@ export async function POST(req: Request) {
         rating_solid: b.solid,
         comment: b.comment?.trim() ? b.comment.trim() : null,
       },
-      { onConflict: "user_id,match_key,semester" }
+      { onConflict: "user_id,match_key" }
     );
     if (error) throw error;
     await logContent({

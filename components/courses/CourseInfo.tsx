@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetState
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/Select";
+import { Modal } from "@/components/ui/Modal";
 import { Textarea } from "@/components/ui/Textarea";
 import { StarRating, StarRatingInput } from "@/components/ui/StarRating";
 import { SEMESTER_OPTIONS } from "@/lib/reviews/key";
@@ -265,7 +266,8 @@ const emptyRatings = (): Record<AxisKey, number> => ({ overall: 0, sweet: 0, chi
 const fillRatings = (r?: CourseReview): Record<AxisKey, number> =>
   r ? { overall: r.rating_overall, sweet: r.rating_sweet, chill: r.rating_chill } : emptyRatings();
 const defaultReviewSemester = (mineBySem: Map<string, CourseReview>) =>
-  SEMESTER_OPTIONS.find((s) => !mineBySem.has(s)) ?? SEMESTER_OPTIONS[0];
+  // 一人一課只留一則：已評過就預設載入該學期（編輯它），否則用最新學期。
+  [...mineBySem.keys()][0] ?? SEMESTER_OPTIONS[0];
 
 // One form for add + edit. Pick any semester: one you've already reviewed loads
 // its values for editing; a new one starts blank. Either way submits via upsert.
@@ -347,17 +349,8 @@ function ReviewForm({
   }
 
   return (
-    <div className="relative space-y-3 rounded-lg border border-border p-5 pt-3">
-      {/* 關閉鈕釘在右上角、脫離文件流，內容才不會被推下留一片空白。 */}
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="關閉"
-        title="關閉"
-        className="absolute right-3 top-3 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        ✕
-      </button>
+    <Modal open onClose={onClose} title={editing ? "編輯評論" : "新增評論"}>
+      <div className="space-y-4">
       <div className="flex items-center gap-2 text-sm">
         <span className="text-muted-foreground">修課學期</span>
         <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
@@ -382,7 +375,13 @@ function ReviewForm({
       <div className="flex flex-wrap items-center justify-end gap-2">
         {err && <p className="mr-auto text-sm text-[hsl(var(--warning))]">{err}</p>}
         {editing && (
-          <Button size="sm" variant="ghost" onClick={remove} disabled={saving} className="text-red-600">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={remove}
+            disabled={saving}
+            className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+          >
             刪除
           </Button>
         )}
@@ -391,7 +390,8 @@ function ReviewForm({
           {saving ? "儲存中…" : editing ? "更新" : "送出"}
         </Button>
       </div>
-    </div>
+      </div>
+    </Modal>
   );
 }
 

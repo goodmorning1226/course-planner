@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { courseInfoQuerySchema, gradeReportBodySchema, gradeReportDeleteSchema } from "@/lib/validations";
 import { matchKey } from "@/lib/reviews/key";
-import { buildSemester, type RawReport, type LegacyBuckets } from "@/lib/grades/reports";
+import { buildSemester, reconstruct, groupReports, legacyToReports, type RawReport, type LegacyBuckets } from "@/lib/grades/reports";
 import { logContent } from "@/lib/audit";
 import { rateLimit, clientKey, RATE_LIMITS } from "@/lib/rate-limit";
 import { apiError, rateLimited } from "@/lib/api-error";
@@ -42,7 +42,8 @@ export async function GET(req: Request) {
     const [reportsR, legacyR] = await Promise.all([
       svc.from("grade_reports")
         .select("semester, pivot, same_pct, above_pct, below_pct, user_id")
-        .eq("match_key", key),
+        .eq("match_key", key)
+        .order("created_at", { ascending: true }), // oldest→newest for deterministic grouping
       svc.from("grade_distributions")
         .select("semester, a_plus, a, a_minus, b_plus, b, b_minus, c_plus, c, c_minus, f")
         .eq("match_key", key),
@@ -73,7 +74,7 @@ export async function GET(req: Request) {
         semester,
         ...buildSemester(reportsBySem.get(semester) ?? [], legacyBySem.get(semester) ?? null),
       }))
-      .filter((s) => s.segments.length > 0)
+      .filter((s) => s.bars.length > 0)
       .sort((a, b) => (a.semester < b.semester ? 1 : -1)); // newest first
 
     // The viewer's own reports, keyed by semester (for prefill/edit).
@@ -108,12 +109,59 @@ export async function POST(req: Request) {
   try {
     const svc = createServiceRoleClient();
     const key = matchKey(b.courseName, b.teacher ?? null);
+
+    // Warn only when this report can't join ANY existing branch — i.e. it
+    // contradicts EVERY branch built from other users' reports + the imported
+    // legacy distribution, so it would open a brand-new divergent bar. If it's
+    // compatible with at least one branch it just merges (no warning). Saving is
+    // still allowed via force; the client confirms first.
+    if (!b.force) {
+      const numOrNull = (v: unknown) => (v == null ? null : Number(v));
+      const [othersR, legacyR] = await Promise.all([
+        svc.from("grade_reports")
+          .select("pivot, same_pct, above_pct, below_pct")
+          .eq("match_key", key)
+          .eq("semester", b.semester)
+          .neq("user_id", user.id)
+          .order("created_at", { ascending: true }),
+        svc.from("grade_distributions")
+          .select("a_plus, a, a_minus, b_plus, b, b_minus, c_plus, c, c_minus, f")
+          .eq("match_key", key)
+          .eq("semester", b.semester)
+          .maybeSingle(),
+      ]);
+      const others = (othersR.data ?? []) as { pivot: string; same_pct: unknown; above_pct: unknown; below_pct: unknown }[];
+      const legacyReports = legacyR.data
+        ? legacyToReports(Object.fromEntries(
+            Object.entries(legacyR.data).map(([k, v]) => [k, numOrNull(v)]),
+          ) as unknown as LegacyBuckets).reports
+        : [];
+      const existing: RawReport[] = [
+        ...legacyReports,
+        ...others.map((o) => ({
+          pivot: o.pivot,
+          same_pct: numOrNull(o.same_pct),
+          above_pct: numOrNull(o.above_pct),
+          below_pct: numOrNull(o.below_pct),
+        })),
+      ];
+      const newReport: RawReport = {
+        pivot: b.pivot, same_pct: b.samePct, above_pct: b.abovePct ?? null, below_pct: b.belowPct ?? null,
+      };
+      const branches = groupReports(existing);
+      const conflictsAll = branches.length > 0 && branches.every((br) => reconstruct([...br, newReport]).conflict);
+      if (conflictsAll) {
+        return NextResponse.json({ conflict: true });
+      }
+    }
+
+    // One report per user per COURSE: match on (user_id, match_key) only, so a
+    // resubmit for a different semester updates (moves) the user's single report.
     const { data: existing } = await svc
       .from("grade_reports")
       .select("id")
       .eq("user_id", user.id)
       .eq("match_key", key)
-      .eq("semester", b.semester)
       .maybeSingle();
     const row = {
       user_id: user.id,

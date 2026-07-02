@@ -137,14 +137,20 @@ export function reconstruct(reports: RawReport[]): {
   };
 
   const segments: Segment[] = [];
+  const lastIdx = GRADE_ORDER.length - 1;
   const top = reported[0];
   const bottom = reported[reported.length - 1];
 
   const aboveTop = aboveOf(top);
   let aboveLumpPresent = false;
   if (aboveTop != null && aboveTop > EPS) {
-    segments.push({ label: "更高 (未細分)", pct: aboveTop, known: false });
-    aboveLumpPresent = true;
+    if (top === 1) {
+      // 上方只夾一個等第（A+）→ 該未細分比例即為其比例，直接還原成已知等第。
+      segments.push({ label: GRADE_ORDER[0], pct: aboveTop, known: true });
+    } else {
+      segments.push({ label: "更高 (未細分)", pct: aboveTop, known: false });
+      aboveLumpPresent = true;
+    }
   }
 
   const openGaps: number[] = [];
@@ -162,7 +168,14 @@ export function reconstruct(reports: RawReport[]): {
           // grades (i+1 … j-1) = below(i) − exact(j) − below(j)
           const gap = bi - exact.get(j)! - bj;
           if (gap < -CONFLICT_TOL) flag(`${GRADE_ORDER[i]} 與 ${GRADE_ORDER[j]} 的回報互相矛盾`);
-          if (gap > EPS) segments.push({ label: "中間 (未細分)", pct: gap, known: false });
+          if (gap > EPS) {
+            if (j === i + 2) {
+              // 中間只夾一個等第 → 其比例可還原，標記成已知等第（而非未細分）。
+              segments.push({ label: GRADE_ORDER[i + 1], pct: gap, known: true });
+            } else {
+              segments.push({ label: "中間 (未細分)", pct: gap, known: false });
+            }
+          }
         }
       }
     }
@@ -171,8 +184,13 @@ export function reconstruct(reports: RawReport[]): {
   const belowBottom = belowOf(bottom);
   let belowLumpPresent = false;
   if (belowBottom != null && belowBottom > EPS) {
-    segments.push({ label: "更低 (未細分)", pct: belowBottom, known: false });
-    belowLumpPresent = true;
+    if (bottom === lastIdx - 1) {
+      // 下方只夾一個等第（F）→ 其比例可直接還原成已知等第。
+      segments.push({ label: GRADE_ORDER[lastIdx], pct: belowBottom, known: true });
+    } else {
+      segments.push({ label: "更低 (未細分)", pct: belowBottom, known: false });
+      belowLumpPresent = true;
+    }
   }
 
   const pinned = [...exact.values()].reduce((a, b) => a + b, 0);
@@ -274,42 +292,56 @@ export function legacyToReports(b: LegacyBuckets): { reports: RawReport[]; kind:
   return { reports, kind: "partial" };
 }
 
-export interface SemesterDist {
+/** One reconstructed distribution bar (a self-consistent set of reports). */
+export interface Bar {
   segments: Segment[];
   pinned: number;
+}
+
+export interface SemesterDist {
+  /** One bar per internally-consistent group of reports. Conflicting reports are
+      NOT merged into one impossible bar — they split into separate bars, drawn
+      stacked (上下兩條線). Usually just one bar. */
+  bars: Bar[];
   /** Number of first-hand user reports behind this (excludes imported data). */
   reportCount: number;
   /** Whether imported grade_distributions data contributed. */
   hasLegacy: boolean;
-  /** Reports contradict each other — distribution is 僅供參考 (approach 2). */
-  conflict: boolean;
-  conflictReason: string | null;
 }
 
 /** Below this leftover % we don't bother drawing an 不確定 band (rounding). */
 const UNCERTAIN_MIN = 1;
 
 /**
- * Build one semester's distribution from first-hand user reports + (optionally)
- * the imported legacy row. Both ALWAYS contribute — a new report never drops the
- * imported data, they merge (the imported bars stay, the report fills in more).
- * Any mass the segments don't account for is placed as a lump: if exactly ONE
- * region is open (above the top / below the bottom / a single unknown gap) it's
- * localised there (更高/更低/中間 未細分), otherwise it's genuinely 無資料.
+ * Group reports into branches (bars) for display. Processed in the given order
+ * (callers pass oldest→newest so the incremental result is deterministic):
+ *
+ *   - a new report is added to EVERY existing branch it doesn't contradict, so
+ *     data compatible with several branches is shared across all of them;
+ *   - only when it conflicts with ALL existing branches does it start a NEW
+ *     branch.
+ *
+ * So conflicting data (users disagreeing) splits into separate bars, while
+ * data that's compatible with a branch merges into it — including into multiple
+ * branches at once.
  */
-export function buildSemester(userReports: RawReport[], legacy?: LegacyBuckets | null): SemesterDist {
-  let reports = [...userReports];
-  let hasLegacy = false;
-  if (legacy) {
-    const { reports: legReports } = legacyToReports(legacy);
-    if (legReports.length > 0) {
-      reports = [...reports, ...legReports];
-      hasLegacy = true;
+export function groupReports(reports: RawReport[]): RawReport[][] {
+  const groups: RawReport[][] = [];
+  for (const r of reports) {
+    const compatible = groups.filter((g) => !reconstruct([...g, r]).conflict);
+    if (compatible.length > 0) {
+      for (const g of compatible) g.push(r);
+    } else {
+      groups.push([r]);
     }
   }
+  return groups;
+}
+
+/** Reconstruct one consistent group into a bar, placing any leftover mass. */
+function finalizeBar(reports: RawReport[]): Bar {
   const rec = reconstruct(reports);
   const segments = rec.segments;
-
   if (segments.length > 0) {
     const leftover = 100 - segments.reduce((a, s) => a + s.pct, 0);
     if (leftover > UNCERTAIN_MIN) {
@@ -326,18 +358,46 @@ export function buildSemester(userReports: RawReport[], legacy?: LegacyBuckets |
         const upper = GRADE_ORDER[rec.openGaps[0]];
         const idx = segments.findIndex((s) => s.known && s.label === upper);
         segments.splice(idx + 1, 0, { label: "中間 (未細分)", pct: leftover, known: false });
+      } else if (openCount > 1) {
+        // 未知量橫跨多個開放區段，各自大小無法得知 → 平均分配寬度，每個開放
+        // 位置各放一個「?」(無資料) 格，畫在它真正所在的位置（上方／中間／下方）。
+        const each = leftover / openCount;
+        if (botOpen) segments.push({ label: "無資料", pct: each, known: false });
+        // 由最下方的 gap 往上插入，findIndex 才不會被前面插入影響。
+        for (let g = rec.openGaps.length - 1; g >= 0; g--) {
+          const upper = GRADE_ORDER[rec.openGaps[g]];
+          const idx = segments.findIndex((s) => s.known && s.label === upper);
+          if (idx >= 0) segments.splice(idx + 1, 0, { label: "無資料", pct: each, known: false });
+        }
+        if (topOpen) segments.unshift({ label: "無資料", pct: each, known: false });
       } else {
         segments.push({ label: "無資料", pct: leftover, known: false });
       }
     }
   }
+  return { segments, pinned: rec.pinned };
+}
 
-  return {
-    segments,
-    pinned: rec.pinned,
-    reportCount: userReports.length,
-    hasLegacy,
-    conflict: rec.conflict,
-    conflictReason: rec.conflictReason,
-  };
+/**
+ * Build one semester's distribution from first-hand user reports + (optionally)
+ * the imported legacy row. Reports are split into internally-consistent groups;
+ * each group becomes a bar. Consistent data yields a single bar; contradictory
+ * reports yield multiple bars (shown stacked) instead of a 資料衝突 flag.
+ */
+export function buildSemester(userReports: RawReport[], legacy?: LegacyBuckets | null): SemesterDist {
+  // Legacy (imported) data is the pre-existing base, so it seeds the branches
+  // first; user reports (passed oldest→newest) then merge in or diverge.
+  let legReports: RawReport[] = [];
+  let hasLegacy = false;
+  if (legacy) {
+    const conv = legacyToReports(legacy);
+    if (conv.reports.length > 0) {
+      legReports = conv.reports;
+      hasLegacy = true;
+    }
+  }
+  const bars = groupReports([...legReports, ...userReports])
+    .map(finalizeBar)
+    .filter((b) => b.segments.length > 0);
+  return { bars, reportCount: userReports.length, hasLegacy };
 }

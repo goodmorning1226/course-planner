@@ -10,19 +10,17 @@ import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/Select";
+import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/input";
 import { SEMESTER_OPTIONS } from "@/lib/reviews/key";
-import { GRADE_ORDER, type Segment } from "@/lib/grades/reports";
+import { GRADE_ORDER, type Segment, type Bar } from "@/lib/grades/reports";
 import { PencilIcon } from "@/components/icons/PencilIcon";
 
 interface SemesterDist {
   semester: string;
-  segments: Segment[];
-  pinned: number;
+  bars: Bar[];
   reportCount: number;
   hasLegacy: boolean;
-  conflict: boolean;
-  conflictReason: string | null;
 }
 interface MyReport {
   pivot: string;
@@ -43,13 +41,8 @@ const GRADE_BAR: Record<string, [string, string, string]> = {
   A: ["bg-emerald-500/95", "bg-emerald-300/90", "bg-emerald-200/85"],
   B: ["bg-yellow-500/95", "bg-yellow-300/90", "bg-yellow-200/85"],
   C: ["bg-red-500/95", "bg-red-300/90", "bg-red-200/85"],
-  F: ["bg-gray-500/95", "bg-gray-300/90", "bg-gray-200/85"],
-};
-const GRADE_DOT: Record<string, [string, string, string]> = {
-  A: ["bg-emerald-500", "bg-emerald-300", "bg-emerald-200"],
-  B: ["bg-yellow-500", "bg-yellow-300", "bg-yellow-200"],
-  C: ["bg-red-500", "bg-red-300", "bg-red-200"],
-  F: ["bg-gray-500", "bg-gray-300", "bg-gray-200"],
+  // F 只有單一等第（用中間色階），用中灰以免與淺灰的「無資料」條紋混淆。
+  F: ["bg-gray-600/95", "bg-gray-500/90", "bg-gray-400/85"],
 };
 // 等第在其分組中的位置：+ 用最鮮明飽和的正色(0)，讓 A+ 最突出；無號(1)與 -(2)
 // 逐級轉為乾淨的淺色。陣列排序為 [鮮明, 淺, 更淺]。
@@ -59,16 +52,16 @@ function tierIndex(label: string): number {
   return 1;
 }
 
-// Colour a segment: grey stripes for an unknown lump (未細分/不確定), else by
-// grade tier.
-function segClass(seg: Segment): string {
-  if (!seg.known)
-    return "bg-[repeating-linear-gradient(45deg,hsl(var(--muted-foreground)/0.18)_0_6px,hsl(var(--muted-foreground)/0.06)_6px_12px)]";
-  return (GRADE_BAR[seg.label[0]] ?? GRADE_BAR.F)[tierIndex(seg.label)];
-}
-function dotClass(seg: Segment): string {
-  if (!seg.known) return "bg-muted-foreground/30";
-  return (GRADE_DOT[seg.label[0]] ?? GRADE_DOT.F)[tierIndex(seg.label)];
+// A segment is one of three kinds:
+//   · known grade            → tier colour, grade + % written INSIDE the box.
+//   · 更高/更低/中間 (未細分) → neutral box, labelled by a BRACKET above the bar.
+//   · 無資料 (grade unknown)  → neutral box with a "?" inside.
+const isNoData = (seg: Segment) => !seg.known && seg.label === "無資料";
+const isBracketed = (seg: Segment) => !seg.known && seg.label !== "無資料";
+/** Box fill colour. */
+function segFill(seg: Segment): string {
+  if (seg.known) return (GRADE_BAR[seg.label[0]] ?? GRADE_BAR.F)[tierIndex(seg.label)];
+  return isNoData(seg) ? "bg-gray-100" : "bg-gray-200";
 }
 
 export function GradeReports({
@@ -142,19 +135,9 @@ export function GradeReports({
         <div className="space-y-5">
           {semesters.map((s) => (
             <div key={s.semester} className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.semester}</span>
-                  {s.conflict && (
-                    <span
-                      className="rounded bg-[hsl(var(--warning))]/15 px-1.5 py-0.5 text-xs text-[hsl(var(--warning))]"
-                      title={s.conflictReason ?? undefined}
-                    >
-                      ⚠ 資料衝突
-                    </span>
-                  )}
-                </div>
-                {/* 只有使用者回報過的學期才顯示編輯圖標；沒填過的一律不顯示。 */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.semester}</span>
+                {/* 只有使用者回報過的學期才顯示編輯圖標，就放在學期旁邊。 */}
                 {loggedIn && myReports[s.semester] && (
                   <button
                     type="button"
@@ -168,28 +151,51 @@ export function GradeReports({
                 )}
               </div>
 
-              {/* Stacked reconstructed bar (muted when reports conflict) */}
-              <div className={"flex h-5 w-full gap-px overflow-hidden rounded bg-muted" + (s.conflict ? " opacity-50" : "")}>
-                {s.segments.map((seg, i) => (
-                  <div
-                    key={i}
-                    className={segClass(seg)}
-                    style={{ width: `${seg.pct}%` }}
-                    title={`${seg.label} ${seg.pct.toFixed(1)}%`}
-                  />
-                ))}
-              </div>
+              {/* 每個一致的回報群組一條 bar（衝突 → 多條上下排列）。示意圖式：
+                  確定等第寫在框裡；更高/更低/中間用括號標在線外；無等第處打「?」。 */}
+              {s.bars.map((bar, bi) => (
+                <div key={bi} className="space-y-0.5">
+                  {/* 線外括號：與下方 bar 用相同寬度對齊，只有「未細分」段落顯示。 */}
+                  <div className="flex h-6 w-full items-end gap-px">
+                    {bar.segments.map((seg, i) =>
+                      isBracketed(seg) ? (
+                        <div key={i} style={{ width: `${seg.pct}%` }} className="flex min-w-0 flex-col items-center">
+                          <span className="whitespace-nowrap text-[11px] font-medium leading-none text-muted-foreground">
+                            {seg.pct.toFixed(0)}%
+                          </span>
+                          <span className="mt-0.5 h-1.5 w-full rounded-t-[3px] border-x border-t border-muted-foreground/40" />
+                        </div>
+                      ) : (
+                        <div key={i} style={{ width: `${seg.pct}%` }} />
+                      ),
+                    )}
+                  </div>
 
-              {/* Legend */}
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm font-semibold text-muted-foreground">
-                {s.segments.map((seg, i) => (
-                  <span key={i} className="inline-flex items-center gap-1">
-                    <span className={"inline-block h-2.5 w-2.5 rounded-sm " + dotClass(seg)} />
-                    <span className={seg.known ? "text-foreground" : ""}>{seg.label}</span>
-                    <span className="tabular-nums">{seg.pct.toFixed(1)}%</span>
-                  </span>
-                ))}
-              </div>
+                  {/* bar 本體：確定等第框內寫等第＋%，無資料框內打「?」。 */}
+                  <div className="flex h-9 w-full gap-px overflow-hidden rounded bg-muted">
+                    {bar.segments.map((seg, i) => (
+                      <div
+                        key={i}
+                        style={{ width: `${seg.pct}%` }}
+                        title={`${seg.label} ${seg.pct.toFixed(1)}%`}
+                        className={
+                          "flex items-center justify-center overflow-hidden px-0.5 text-center leading-none " +
+                          segFill(seg)
+                        }
+                      >
+                        {seg.known ? (
+                          <span className="flex flex-col items-center gap-0.5 text-[11px] font-semibold text-gray-900">
+                            <span>{seg.label}</span>
+                            <span className="tabular-nums">{seg.pct.toFixed(0)}%</span>
+                          </span>
+                        ) : (
+                          <span className="text-sm font-semibold text-muted-foreground">?</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -215,7 +221,10 @@ function ReportForm({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [semester, setSemester] = useState(initialSemester ?? SEMESTER_OPTIONS[0]);
+  // 一人一課只留一筆：已回報過就預設載入該學期（更新它），否則用最新學期。
+  const [semester, setSemester] = useState(
+    initialSemester ?? Object.keys(myReports)[0] ?? SEMESTER_OPTIONS[0],
+  );
   const mine = myReports[semester];
   const [pivot, setPivot] = useState(mine?.pivot ?? "A");
   const [same, setSame] = useState(mine?.samePct != null ? String(mine.samePct) : "");
@@ -241,7 +250,7 @@ function ReportForm({
     if (belowLocked) setBelow("");
   }, [aboveLocked, belowLocked]);
 
-  async function submit() {
+  async function submit(force = false) {
     setErr(null);
     const num = (x: string) => (x === "" ? null : Number(x));
     const sameN = num(same);
@@ -269,12 +278,19 @@ function ReportForm({
           samePct: sameN,
           abovePct: aboveLocked ? null : num(above),
           belowPct: belowLocked ? null : num(below),
+          force,
         }),
       });
-      if (!r.ok) {
-        const j = await r.json().catch(() => null);
-        throw new Error(j?.error?.message ?? "儲存失敗");
+      const j = await r.json().catch(() => null);
+      // 與其他人的資料衝突：先詢問使用者，確認後帶 force 重送（兩者都會保留）。
+      if (r.ok && j?.conflict && !force) {
+        setSaving(false);
+        if (window.confirm("你填的資料與系統現有資料衝突，確定要送出嗎？")) {
+          return submit(true);
+        }
+        return;
       }
+      if (!r.ok) throw new Error(j?.error?.message ?? "儲存失敗");
       onSaved();
     } catch (e) {
       setErr((e as Error).message);
@@ -306,41 +322,31 @@ function ReportForm({
   }
 
   return (
-    <div className="space-y-4 rounded-lg border border-border p-5">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-          <label className="flex items-center gap-2">
-            <span className="text-muted-foreground">修課學期</span>
-            <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
-              {SEMESTER_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                  {myReports[s] ? "（已回報）" : ""}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label className="flex items-center gap-2">
-            <span className="text-muted-foreground">你的等第</span>
-            <Select value={pivot} onChange={(e) => setPivot(e.target.value)}>
-              {GRADE_ORDER.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </Select>
-          </label>
-          {editing && <span className="text-xs text-muted-foreground">編輯我這學期的回報</span>}
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="關閉"
-          title="關閉"
-          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          ✕
-        </button>
+    <Modal open onClose={onClose} title={editing ? "編輯成績回報" : "回報成績"}>
+      <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <label className="flex items-center gap-2">
+          <span className="text-muted-foreground">修課學期</span>
+          <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
+            {SEMESTER_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+                {myReports[s] ? "（已回報）" : ""}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-muted-foreground">你的等第</span>
+          <Select value={pivot} onChange={(e) => setPivot(e.target.value)}>
+            {GRADE_ORDER.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </Select>
+        </label>
+        {editing && <span className="text-xs text-muted-foreground">編輯我這學期的回報</span>}
       </div>
 
       <span className="block text-sm font-medium">請填入 epo 系統顯示的三個比例：</span>
@@ -359,31 +365,30 @@ function ReportForm({
           onChange={setAbove}
           disabled={aboveLocked}
         />
-        {/* 按鈕與其上方的橘紅提示小字一起靠右下角。 */}
-        <div className="ml-auto flex flex-col items-end gap-1">
-          {err && <p className="text-sm text-[hsl(var(--warning))]">{err}</p>}
-          <div className="flex gap-2">
-            {editing && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={remove}
-                disabled={saving}
-                className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
-              >
-                刪除
-              </Button>
-            )}
-            <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
-              取消
-            </Button>
-            <Button size="sm" onClick={submit} disabled={saving}>
-              {saving ? "儲存中…" : editing ? "更新" : "送出"}
-            </Button>
-          </div>
-        </div>
       </div>
-    </div>
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {err && <p className="mr-auto text-sm text-[hsl(var(--warning))]">{err}</p>}
+        {editing && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={remove}
+            disabled={saving}
+            className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+          >
+            刪除
+          </Button>
+        )}
+        <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
+          取消
+        </Button>
+        <Button size="sm" onClick={() => submit()} disabled={saving}>
+          {saving ? "儲存中…" : editing ? "更新" : "送出"}
+        </Button>
+      </div>
+      </div>
+    </Modal>
   );
 }
 
