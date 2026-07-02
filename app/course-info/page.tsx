@@ -20,7 +20,9 @@ export default async function CourseInfoPage({
       ? { href: "/my-reviews", label: "← 我的評論" }
       : searchParams.from === "my-grades"
         ? { href: "/my-reviews?tab=grades", label: "← 我的評論" }
-        : { href: "/", label: "← 課程搜尋" };
+        : searchParams.from === "favorites"
+          ? { href: "/favorites", label: "← 我的收藏" }
+          : { href: "/", label: "← 課程搜尋" };
 
   const supabase = createServerSupabaseClient();
   const {

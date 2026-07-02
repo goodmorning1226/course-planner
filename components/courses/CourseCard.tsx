@@ -31,6 +31,7 @@ export function CourseCard({
   infoCount,
   isFavorited = false,
   onToggleFavorite,
+  infoFrom,
 }: {
   course: CourseWithSessionsAndMetadata;
   isSelected?: boolean;
@@ -41,11 +42,14 @@ export function CourseCard({
   /** 課程收藏 state + toggle. The flag renders only when a handler is given. */
   isFavorited?: boolean;
   onToggleFavorite?: (course: CourseWithSessionsAndMetadata) => void;
+  /** 修課情報返回連結來源（如 "favorites" → 返回我的收藏）。預設回課程搜尋。 */
+  infoFrom?: string;
 }) {
   const infoTotal = infoCount ? infoCount.reviews + infoCount.grades : null;
   const infoHref =
     `/course-info?name=${encodeURIComponent(course.course_name)}` +
-    (course.teacher ? `&teacher=${encodeURIComponent(course.teacher)}` : "");
+    (course.teacher ? `&teacher=${encodeURIComponent(course.teacher)}` : "") +
+    (infoFrom ? `&from=${infoFrom}` : "");
   // Course-level secondary facts, missing ones dropped. 流水號 leads this line.
   const meta = [
     course.pk && `流水號 ${course.pk}`,

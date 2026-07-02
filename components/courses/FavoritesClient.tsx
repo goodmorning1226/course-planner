@@ -142,6 +142,7 @@ export function FavoritesClient({ userEmail }: { userEmail: string }) {
             infoCount={infoCounts[matchKey(course.course_name, course.teacher ?? null)]}
             isFavorited
             onToggleFavorite={removeFavorite}
+            infoFrom="favorites"
           />
         ))
       )}

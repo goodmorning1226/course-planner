@@ -111,6 +111,14 @@ export function GradeReports({
     return map;
   }, [semesters]);
 
+  // 已經 100% 完整（單一 bar、每格都是確定等第、沒有未細分）的學期 → 不能再回報。
+  const completeSemesters = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of semesters)
+      if (s.bars.length === 1 && s.bars[0].segments.every((seg) => seg.known)) set.add(s.semester);
+    return set;
+  }, [semesters]);
+
   return (
     <div className="space-y-4">
       {/* 觸發按鈕在 CourseInfo 頁籤列；表單面板／未登入提示放最上面，和「新增評論」一致。 */}
@@ -121,6 +129,7 @@ export function GradeReports({
           initialSemester={form.initial}
           myReports={myReports}
           takenGrades={takenGrades}
+          completeSemesters={completeSemesters}
           onClose={() => setForm(null)}
           onSaved={() => {
             setForm(null);
@@ -160,7 +169,7 @@ export function GradeReports({
                         key={i}
                         style={{ flexBasis: `${seg.pct}%` }}
                         // 電腦版用滑鼠 hover 由 title 顯示完整比例（手機不需要）。
-                        title={`${seg.label} ${seg.pct.toFixed(1)}%`}
+                        title={`${seg.label} ${seg.pct.toFixed(2)}%`}
                         className={
                           "flex min-w-[1.2rem] items-center justify-center overflow-hidden px-1 leading-none sm:min-w-[1.5rem] " +
                           segFill(seg)
@@ -181,8 +190,7 @@ export function GradeReports({
                               "tabular-nums" + (seg.pct < 5 ? " sm:hidden" : "")
                             }
                           >
-                            {/* 10% 以上顯示到小數點後一位；未滿 10% 取整數。 */}
-                            {seg.pct.toFixed(seg.pct >= 10 ? 1 : 0)}%
+                            {seg.pct.toFixed(2)}%
                           </span>
                         </span>
                       </div>
@@ -206,6 +214,7 @@ export function ReportForm({
   initialSemester,
   myReports,
   takenGrades,
+  completeSemesters,
   onClose,
   onSaved,
   inline = false,
@@ -216,6 +225,8 @@ export function ReportForm({
   myReports: Record<string, MyReport>;
   /** 每學期系統已有資料的等第 → 不能重複回報。缺省時不限制（例如編輯既有回報）。 */
   takenGrades?: Record<string, string[]>;
+  /** 已 100% 完整的學期 → 不能再回報（選擇時停用）。 */
+  completeSemesters?: Set<string>;
   onClose: () => void;
   onSaved: () => void;
   // inline=true：不用彈出視窗，直接在原位展開表單（用於「我的評論」成績分布頁）。
@@ -225,7 +236,11 @@ export function ReportForm({
   // 已填的等第與比例——換學期只是把這筆「移到」另一個學期。
   const existing = Object.entries(myReports)[0]; // [semester, MyReport] | undefined
   const mine = existing?.[1];
-  const initialSem = initialSemester ?? existing?.[0] ?? SEMESTER_OPTIONS[0];
+  const initialSem =
+    initialSemester ??
+    existing?.[0] ??
+    SEMESTER_OPTIONS.find((s) => !completeSemesters?.has(s)) ??
+    SEMESTER_OPTIONS[0];
   const [semester, setSemester] = useState(initialSem);
   const [pivot, setPivot] = useState(() => {
     if (mine?.pivot) return mine.pivot;
@@ -254,7 +269,16 @@ export function ReportForm({
     if (belowLocked) setBelow("");
   }, [aboveLocked, belowLocked]);
 
-  async function submit(force = false) {
+  // 一人一課只留一筆：改學期＝把既有回報「移到」新學期。若已回報過，先確認。
+  function changeSemester(next: string) {
+    if (next === semester) return;
+    if (editing && existing && semester === existing[0] && next !== existing[0]) {
+      if (!window.confirm(`你已回報過（${existing[0]}）。改成 ${next} 會把這筆回報改到新的修課學期，確定要改嗎？`)) return;
+    }
+    setSemester(next);
+  }
+
+  async function submit() {
     setErr(null);
     // 系統已有該等第的資料 → 不能重複回報。
     if (disabledGrades.has(pivot)) {
@@ -287,17 +311,12 @@ export function ReportForm({
           samePct: sameN,
           abovePct: aboveLocked ? null : num(above),
           belowPct: belowLocked ? null : num(below),
-          force,
         }),
       });
       const j = await r.json().catch(() => null);
-      // 與其他人的資料衝突：先詢問使用者，確認後帶 force 重送（兩者都會保留）。
-      if (r.ok && j?.conflict && !force) {
-        setSaving(false);
-        if (window.confirm("你填的資料與系統現有資料衝突，確定要送出嗎？")) {
-          return submit(true);
-        }
-        return;
+      // 與系統現有資料衝突（差距 >5%）→ 無法送出。差距 ≤5% 不算衝突、可正常送出。
+      if (r.ok && j?.conflict) {
+        return setErr("你填的資料與系統現有資料衝突（差距過大），無法送出，請確認後再試。");
       }
       if (!r.ok) throw new Error(j?.error?.message ?? "儲存失敗");
       onSaved();
@@ -359,13 +378,17 @@ export function ReportForm({
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
           <label className="flex items-center gap-2">
             <span className="text-muted-foreground">修課學期</span>
-            <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
-              {SEMESTER_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                  {myReports[s] ? "（已回報）" : ""}
-                </option>
-              ))}
+            <Select value={semester} onChange={(e) => changeSemester(e.target.value)}>
+              {SEMESTER_OPTIONS.map((s) => {
+                // 已 100% 完整的學期不能再選（但自己回報的那學期仍可編輯）。
+                const full = !!completeSemesters?.has(s) && s !== existing?.[0];
+                return (
+                  <option key={s} value={s} disabled={full}>
+                    {s}
+                    {myReports[s] ? "（已回報）" : full ? "（已完整）" : ""}
+                  </option>
+                );
+              })}
             </Select>
           </label>
           {gradeSelect}
@@ -452,6 +475,10 @@ function PctField({
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
+          // 離開欄位時補足小數兩位（例：50 → 50.00、23.4 → 23.40）。
+          onBlur={() => {
+            if (value !== "" && Number.isFinite(Number(value))) onChange(Number(value).toFixed(2));
+          }}
           placeholder={disabled ? "—" : undefined}
           // pr-7 leaves room for the fixed %；隱藏數字上下三角按鍵（webkit + firefox）。
           className="h-8 w-full pr-7 [appearance:textfield] disabled:cursor-not-allowed [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
