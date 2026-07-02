@@ -14,7 +14,7 @@ import type { CourseReview, ReviewAggregate } from "@/lib/courses/types";
 
 type Row = {
   id: string; user_id: string; course_name: string; teacher: string | null; semester: string;
-  rating_overall: number; rating_sweet: number; rating_chill: number; rating_solid: number;
+  rating_overall: number; rating_sweet: number | null; rating_chill: number | null; rating_solid: number;
   comment: string | null; like_count: number; created_at: string; updated_at: string;
 };
 
@@ -56,8 +56,9 @@ export async function GET(req: Request) {
     const aggregate: ReviewAggregate = {
       count: rows.length,
       overall: avg(rows.map((r) => Number(r.rating_overall))),
-      sweet: avg(rows.map((r) => Number(r.rating_sweet))),
-      chill: avg(rows.map((r) => Number(r.rating_chill))),
+      // 甜度／涼度為選填：略過未評分（null）的列，只平均有給分的。
+      sweet: avg(rows.filter((r) => r.rating_sweet != null).map((r) => Number(r.rating_sweet))),
+      chill: avg(rows.filter((r) => r.rating_chill != null).map((r) => Number(r.rating_chill))),
       solid: avg(rows.map((r) => Number(r.rating_solid))),
     };
     const reviews: CourseReview[] = rows.map((r) => ({
@@ -66,8 +67,8 @@ export async function GET(req: Request) {
       teacher: r.teacher,
       semester: r.semester,
       rating_overall: Number(r.rating_overall),
-      rating_sweet: Number(r.rating_sweet),
-      rating_chill: Number(r.rating_chill),
+      rating_sweet: r.rating_sweet != null ? Number(r.rating_sweet) : null,
+      rating_chill: r.rating_chill != null ? Number(r.rating_chill) : null,
       rating_solid: Number(r.rating_solid),
       comment: r.comment,
       like_count: r.like_count,
@@ -116,8 +117,8 @@ export async function POST(req: Request) {
         match_key: key,
         semester: b.semester,
         rating_overall: b.overall,
-        rating_sweet: b.sweet,
-        rating_chill: b.chill,
+        rating_sweet: b.sweet ?? null,
+        rating_chill: b.chill ?? null,
         rating_solid: b.solid,
         comment: b.comment?.trim() ? b.comment.trim() : null,
       },

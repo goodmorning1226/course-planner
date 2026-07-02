@@ -88,14 +88,15 @@ export function MyReviews() {
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 {AXES.map((a) => (
                   <span key={a.key} className="inline-flex items-center gap-1">
-                    {a.label} <StarRating value={rv[a.key] as number} size={13} />
+                    {a.label}{" "}
+                    {rv[a.key] == null ? <span>—</span> : <StarRating value={rv[a.key] as number} size={13} />}
                   </span>
                 ))}
               </div>
               {rv.comment && <p className="whitespace-pre-wrap text-sm">{rv.comment}</p>}
               <div className="flex justify-end gap-2">
                 <Link
-                  href={`/course-info?name=${encodeURIComponent(rv.course_name)}${rv.teacher ? `&teacher=${encodeURIComponent(rv.teacher)}` : ""}`}
+                  href={`/course-info?name=${encodeURIComponent(rv.course_name)}${rv.teacher ? `&teacher=${encodeURIComponent(rv.teacher)}` : ""}&from=my-reviews`}
                   className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-transparent px-3 text-sm font-medium transition-colors hover:bg-muted"
                 >
                   修課情報
@@ -146,7 +147,7 @@ export function MyReviews() {
 
 function EditRow({ review, onDone, onCancel }: { review: CourseReview; onDone: () => void; onCancel: () => void }) {
   const [ratings, setRatings] = useState({
-    overall: review.rating_overall, sweet: review.rating_sweet, chill: review.rating_chill,
+    overall: review.rating_overall, sweet: review.rating_sweet ?? 0, chill: review.rating_chill ?? 0,
   });
   const [comment, setComment] = useState(review.comment ?? "");
   const [busy, setBusy] = useState(false);
@@ -160,7 +161,17 @@ function EditRow({ review, onDone, onCancel }: { review: CourseReview; onDone: (
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // 扎實 已從介面移除，但後端仍要求 solid；沿用總體評分填入以符合驗證。
-        body: JSON.stringify({ courseName: review.course_name, teacher: review.teacher, semester: review.semester, ...ratings, solid: ratings.overall, comment }),
+        // 甜度／涼度為選填，未給分（0）時送 null。
+        body: JSON.stringify({
+          courseName: review.course_name,
+          teacher: review.teacher,
+          semester: review.semester,
+          overall: ratings.overall,
+          sweet: ratings.sweet >= 0.5 ? ratings.sweet : null,
+          chill: ratings.chill >= 0.5 ? ratings.chill : null,
+          solid: ratings.overall,
+          comment,
+        }),
       });
       if (!r.ok) throw new Error();
       onDone();

@@ -136,8 +136,9 @@ export const reviewBodySchema = z.object({
   teacher: z.string().trim().max(100).optional().nullable(),
   semester: SEMESTER,
   overall: HALF_STAR,
-  sweet: HALF_STAR,
-  chill: HALF_STAR,
+  // 甜度／涼度為選填：未評分時可省略或傳 null。
+  sweet: HALF_STAR.nullable().optional(),
+  chill: HALF_STAR.nullable().optional(),
   solid: HALF_STAR,
   comment: z.string().trim().max(500, "評論最多 500 字").optional().nullable(),
 });

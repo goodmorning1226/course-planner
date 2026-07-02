@@ -25,9 +25,9 @@ create table if not exists public.course_reviews (
   teacher        text,                          -- 顯示用
   match_key      text not null,                 -- 正規化 課名|教師
   semester       text not null,                 -- 'XXX-Y'
-  rating_overall numeric(2,1) not null,         -- 總體
-  rating_sweet   numeric(2,1) not null,         -- 甜度
-  rating_chill   numeric(2,1) not null,         -- 涼度
+  rating_overall numeric(2,1) not null,         -- 總體（必填）
+  rating_sweet   numeric(2,1),                  -- 甜度（選填）
+  rating_chill   numeric(2,1),                  -- 涼度（選填）
   rating_solid   numeric(2,1) not null,         -- 扎實
   comment        text,                          -- 選填
   like_count     int not null default 0,        -- 去正規化（like API 維護）

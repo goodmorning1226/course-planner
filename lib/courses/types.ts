@@ -190,8 +190,8 @@ export interface CourseReview {
   teacher: string | null;
   semester: string;
   rating_overall: number; // 總體 0.5..5 (half steps)
-  rating_sweet: number;   // 甜度
-  rating_chill: number;   // 涼度
+  rating_sweet: number | null;   // 甜度（選填）
+  rating_chill: number | null;   // 涼度（選填）
   rating_solid: number;   // 扎實
   comment: string | null;
   like_count: number;

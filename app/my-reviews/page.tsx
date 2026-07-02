@@ -4,7 +4,11 @@ import { MyContributions } from "@/components/reviews/MyContributions";
 
 export const metadata = { title: "我的評論" };
 
-export default async function MyReviewsPage() {
+export default async function MyReviewsPage({
+  searchParams,
+}: {
+  searchParams: { tab?: string };
+}) {
   const supabase = createServerSupabaseClient();
   const {
     data: { user },
@@ -25,7 +29,7 @@ export default async function MyReviewsPage() {
       <header className="space-y-1 text-center">
         <h1 className="text-xl font-semibold">我的評論</h1>
       </header>
-      <MyContributions />
+      <MyContributions initialTab={searchParams.tab === "grades" ? "grades" : "reviews"} />
     </div>
   );
 }

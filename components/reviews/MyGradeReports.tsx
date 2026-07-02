@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/Modal";
+import { ReportForm, type MyReport } from "@/components/courses/GradeReports";
 import type { MyGradeReport } from "@/app/api/grade-reports/me/route";
 
 // The user's own 成績分布 reports (成績回報) — listed on /my-reviews' 成績分布 tab.
@@ -15,6 +16,8 @@ export function MyGradeReports() {
   const [deleteTarget, setDeleteTarget] = useState<MyGradeReport | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  // 直接在本頁編輯的成績回報（null 時關閉）— 沿用修課情報頁的 ReportForm 表單。
+  const [editTarget, setEditTarget] = useState<MyGradeReport | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -71,42 +74,69 @@ export function MyGradeReports() {
         {reports.map((rp) => {
           const infoHref =
             `/course-info?name=${encodeURIComponent(rp.course_name)}` +
-            (rp.teacher ? `&teacher=${encodeURIComponent(rp.teacher)}` : "");
-          // 「編輯」導到修課情報的成績分布頁，並自動展開這學期的回報表單。
-          const editHref = `${infoHref}&tab=grades&editGrade=${encodeURIComponent(rp.semester)}`;
+            (rp.teacher ? `&teacher=${encodeURIComponent(rp.teacher)}` : "") +
+            "&from=my-grades";
+          // 編輯中：原位展開成績回報表單，取代這格的摘要內容。
+          if (editTarget?.id === rp.id) {
+            return (
+              <li key={rp.id}>
+                <ReportForm
+                  inline
+                  courseName={rp.course_name}
+                  teacher={rp.teacher}
+                  initialSemester={rp.semester}
+                  myReports={{
+                    [rp.semester]: {
+                      pivot: rp.pivot,
+                      samePct: rp.same_pct,
+                      abovePct: rp.above_pct,
+                      belowPct: rp.below_pct,
+                    } satisfies MyReport,
+                  }}
+                  onClose={() => setEditTarget(null)}
+                  onSaved={() => {
+                    setEditTarget(null);
+                    load();
+                  }}
+                />
+              </li>
+            );
+          }
           return (
             <li key={rp.id}>
               <Card className="p-4">
-                {/* 左邊資訊整欄；按鈕靠右並對齊底部（右下角）。 */}
-                <div className="flex items-end justify-between gap-3">
+                {/* 電腦版：資訊在左、按鈕靠右對齊底部。手機版：按鈕改到資訊下方獨立一列，
+                    緊貼內容不留空白。 */}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div className="min-w-0 space-y-2">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="font-medium">{rp.course_name}</span>
-                      {rp.teacher && <span className="text-xs text-muted-foreground">{rp.teacher}</span>}
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{rp.semester}</span>
-                      <span className="rounded bg-foreground px-1.5 py-0.5 text-xs text-background">
-                        {rp.pivot}
-                      </span>
+                    {/* 標題整行不換行：只有課名過長時以 … 截斷（教師名維持完整、緊貼課名），
+                        學期＋等第固定靠右上角。 */}
+                    <div className="flex items-center gap-x-2">
+                      <span className="min-w-0 truncate font-medium">{rp.course_name}</span>
+                      {rp.teacher && <span className="shrink-0 text-xs text-muted-foreground">{rp.teacher}</span>}
+                      <div className="ml-auto flex shrink-0 items-center gap-x-2">
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{rp.semester}</span>
+                        <span className="rounded bg-foreground px-1.5 py-0.5 text-xs text-background">
+                          {rp.pivot}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-foreground">
                       <span>比我低 {pct(rp.below_pct)}</span>
                       <span>與我相同 {pct(rp.same_pct)}</span>
                       <span>比我高 {pct(rp.above_pct)}</span>
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 items-center justify-end gap-2">
                     <Link
                       href={infoHref}
                       className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-transparent px-3 text-sm font-medium transition-colors hover:bg-muted"
                     >
                       修課情報
                     </Link>
-                    <Link
-                      href={editHref}
-                      className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-transparent px-3 text-sm font-medium transition-colors hover:bg-muted"
-                    >
+                    <Button size="sm" variant="outline" onClick={() => setEditTarget(rp)}>
                       編輯
-                    </Link>
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"

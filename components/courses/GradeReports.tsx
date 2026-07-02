@@ -22,7 +22,7 @@ interface SemesterDist {
   reportCount: number;
   hasLegacy: boolean;
 }
-interface MyReport {
+export interface MyReport {
   pivot: string;
   samePct: number | null;
   abovePct: number | null;
@@ -206,13 +206,14 @@ export function GradeReports({
 
 // Submit/edit the viewer's OWN report: their grade + the three numbers NTU
 // showed them (同等 required; 以上/以下 recommended so gaps can be located).
-function ReportForm({
+export function ReportForm({
   courseName,
   teacher,
   initialSemester,
   myReports,
   onClose,
   onSaved,
+  inline = false,
 }: {
   courseName: string;
   teacher: string | null;
@@ -220,6 +221,8 @@ function ReportForm({
   myReports: Record<string, MyReport>;
   onClose: () => void;
   onSaved: () => void;
+  // inline=true：不用彈出視窗，直接在原位展開表單（用於「我的評論」成績分布頁）。
+  inline?: boolean;
 }) {
   // 一人一課只留一筆：已回報過就預設載入該學期（更新它），否則用最新學期。
   const [semester, setSemester] = useState(
@@ -321,46 +324,60 @@ function ReportForm({
     }
   }
 
-  return (
-    <Modal open onClose={onClose} title={editing ? "編輯成績回報" : "回報成績"}>
+  const title = editing ? "編輯成績回報" : "回報成績";
+  const gradeSelect = (
+    <label className="flex items-center gap-2">
+      <span className="text-muted-foreground">你的等第</span>
+      <Select value={pivot} onChange={(e) => setPivot(e.target.value)}>
+        {GRADE_ORDER.map((g) => (
+          <option key={g} value={g}>
+            {g}
+          </option>
+        ))}
+      </Select>
+    </label>
+  );
+  const body = (
       <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-        <label className="flex items-center gap-2">
-          <span className="text-muted-foreground">修課學期</span>
-          <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
-            {SEMESTER_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-                {myReports[s] ? "（已回報）" : ""}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label className="flex items-center gap-2">
-          <span className="text-muted-foreground">你的等第</span>
-          <Select value={pivot} onChange={(e) => setPivot(e.target.value)}>
-            {GRADE_ORDER.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </Select>
-        </label>
-        {editing && <span className="text-xs text-muted-foreground">編輯我這學期的回報</span>}
-      </div>
+      {inline ? (
+        // 原位編輯：課名＋教師＋學期做標題（學期固定），等第沿用下拉選單，設計與「我的評論」評價編輯一致。
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+          <span className="font-medium">{courseName}</span>
+          {teacher && <span className="text-xs text-muted-foreground">{teacher}</span>}
+          <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{semester}</span>
+          {gradeSelect}
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <label className="flex items-center gap-2">
+            <span className="text-muted-foreground">修課學期</span>
+            <Select value={semester} onChange={(e) => setSemester(e.target.value)}>
+              {SEMESTER_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                  {myReports[s] ? "（已回報）" : ""}
+                </option>
+              ))}
+            </Select>
+          </label>
+          {gradeSelect}
+          {editing && <span className="text-xs text-muted-foreground">編輯我這學期的回報</span>}
+        </div>
+      )}
 
       <span className="block text-sm font-medium">請填入 epo 系統顯示的三個比例：</span>
 
-      <div className="flex flex-wrap items-end gap-6">
+      {/* 手機版：三格縮短並排同一列（grid 三欄）；電腦版維持較寬的排列。 */}
+      <div className="grid grid-cols-3 items-end gap-2 sm:flex sm:flex-wrap sm:gap-6">
         <PctField
-          label={belowLocked ? "比您成績低的比例（F 為最低）" : "比您成績低的比例（選填）"}
+          label={belowLocked ? "比您成績低的（F 最低）" : "比您成績低的"}
           value={belowLocked ? "" : below}
           onChange={setBelow}
           disabled={belowLocked}
         />
-        <PctField label="與您成績相同的比例（必填）" value={same} onChange={setSame} required />
+        <PctField label="與您成績相同的" value={same} onChange={setSame} required />
         <PctField
-          label={aboveLocked ? "比您成績高的比例（A+ 為最高）" : "比您成績高的比例（選填）"}
+          label={aboveLocked ? "比您成績高的（A+ 最高）" : "比您成績高的"}
           value={aboveLocked ? "" : above}
           onChange={setAbove}
           disabled={aboveLocked}
@@ -368,8 +385,9 @@ function ReportForm({
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {err && <p className="mr-auto text-sm text-[hsl(var(--warning))]">{err}</p>}
-        {editing && (
+        {err && <p className="w-full text-sm text-[hsl(var(--warning))]">{err}</p>}
+        {/* 原位編輯（inline）只保留 取消／儲存；彈窗模式仍提供刪除。 */}
+        {editing && !inline && (
           <Button
             size="sm"
             variant="outline"
@@ -384,10 +402,20 @@ function ReportForm({
           取消
         </Button>
         <Button size="sm" onClick={() => submit()} disabled={saving}>
-          {saving ? "儲存中…" : editing ? "更新" : "送出"}
+          {saving ? "儲存中…" : inline ? "儲存" : editing ? "更新" : "送出"}
         </Button>
       </div>
       </div>
+  );
+
+  // 原位展開：直接套用卡片外框，設計與「我的評論」評價編輯一致（課名做標題、無彈窗）。
+  if (inline) {
+    return <div className="rounded-lg border border-border bg-card p-4">{body}</div>;
+  }
+
+  return (
+    <Modal open onClose={onClose} title={title}>
+      {body}
     </Modal>
   );
 }
@@ -406,7 +434,7 @@ function PctField({
   disabled?: boolean;
 }) {
   return (
-    <label className={"flex w-44 flex-col gap-1 whitespace-nowrap text-xs" + (disabled ? " opacity-50" : "")}>
+    <label className={"flex w-full flex-col gap-1 text-xs sm:w-44 sm:whitespace-nowrap" + (disabled ? " opacity-50" : "")}>
       <span className="text-muted-foreground">
         {label}
         {required && <span className="text-[hsl(var(--warning))]"> *</span>}
